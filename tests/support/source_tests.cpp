@@ -1,44 +1,14 @@
 #include "ember/support/diagnostic.hpp"
 #include "ember/support/source.hpp"
 
+#include "test_harness.hpp"
+
 #include <array>
-#include <iostream>
-#include <source_location>
 #include <string>
 #include <string_view>
 
 namespace {
-
-class TestContext {
-public:
-    void beginTest(std::string_view name) noexcept
-    {
-        currentTest_ = name;
-    }
-
-    void expect(
-        bool condition,
-        std::string_view expression,
-        std::source_location location = std::source_location::current())
-    {
-        if (condition) {
-            return;
-        }
-
-        ++failures_;
-        std::cerr << location.file_name() << ':' << location.line() << ": [" << currentTest_
-                  << "] expectation failed: " << expression << '\n';
-    }
-
-    [[nodiscard]] int exitCode() const noexcept
-    {
-        return failures_ == 0 ? 0 : 1;
-    }
-
-private:
-    int failures_ {};
-    std::string_view currentTest_;
-};
+using ember::test::TestContext;
 
 using ember::support::DiagnosticSeverity;
 using ember::support::DiagnosticStage;
@@ -47,7 +17,7 @@ using ember::support::SourceLocation;
 using ember::support::SourceSpan;
 using ember::support::SourceText;
 
-void testValidUtf8AndLocations(TestContext& tests)
+EMBER_TEST("valid UTF-8 and locations")
 {
     const SourceText source {SourceId {7}, "valid.ember", "a\xCE\xB1\r\nb"};
 
@@ -66,7 +36,7 @@ void testValidUtf8AndLocations(TestContext& tests)
     tests.expect(!source.locationAt(4).has_value(), "middle of CRLF has no location");
 }
 
-void testSlice(TestContext& tests)
+EMBER_TEST("slice")
 {
     const SourceText source {SourceId {3}, "slice.ember", "h\xCE\xB1llo"};
 
@@ -85,7 +55,7 @@ void testSlice(TestContext& tests)
                  "slice allows a zero-width EOF span");
 }
 
-void testUtf8BomDiagnostic(TestContext& tests)
+EMBER_TEST("UTF-8 BOM diagnostic")
 {
     const SourceText source {SourceId {11}, "bom.ember", "\xEF\xBB\xBF" "fn main() {}"};
     const auto diagnostic = source.validateEncoding();
@@ -103,7 +73,7 @@ void testUtf8BomDiagnostic(TestContext& tests)
                  "BOM diagnostic covers all three BOM bytes");
 }
 
-void testMalformedUtf8Diagnostic(TestContext& tests)
+EMBER_TEST("malformed UTF-8 diagnostic")
 {
     const SourceText source {SourceId {12}, "invalid.ember", "\xC2" "A"};
     const auto diagnostic = source.validateEncoding();
@@ -118,7 +88,7 @@ void testMalformedUtf8Diagnostic(TestContext& tests)
                  "invalid UTF-8 span contains the bytes needed to detect the error");
 }
 
-void testLineEndingsAndUnicodeBoundaries(TestContext& tests)
+EMBER_TEST("line endings and Unicode boundaries")
 {
     const SourceText empty {SourceId {13}, "empty.ember", ""};
     tests.expect(empty.locationAt(0) == SourceLocation {.offset = 0, .line = 1, .column = 1},
@@ -139,7 +109,7 @@ void testLineEndingsAndUnicodeBoundaries(TestContext& tests)
     tests.expect(!tabAndEmoji.isSourceBoundary(3), "middle of a four-byte scalar is not a source boundary");
 }
 
-void testInvalidUtf8Cases(TestContext& tests)
+EMBER_TEST("invalid UTF-8 cases")
 {
     struct InvalidUtf8Case {
         std::string_view name;
@@ -168,7 +138,7 @@ void testInvalidUtf8Cases(TestContext& tests)
     }
 }
 
-void testInvalidSourceBoundaries(TestContext& tests)
+EMBER_TEST("invalid source boundaries")
 {
     const SourceText source {SourceId {17}, "invalid.ember", "\x80"};
     const auto diagnostic = source.validateEncoding();
@@ -187,7 +157,7 @@ void testInvalidSourceBoundaries(TestContext& tests)
                  "raw slice exposes diagnostic bytes");
 }
 
-void testBomBeforeMalformedUtf8(TestContext& tests)
+EMBER_TEST("BOM before malformed UTF-8")
 {
     const SourceText source {SourceId {18}, "bom-invalid.ember", "\xEF\xBB\xBF" "\xC2" "A"};
     const auto diagnostic = source.validateEncoding();
@@ -208,31 +178,3 @@ void testBomBeforeMalformedUtf8(TestContext& tests)
 }
 
 } // namespace
-
-int main()
-{
-    using TestFunction = void (*)(TestContext&);
-    struct TestCase {
-        std::string_view name;
-        TestFunction function;
-    };
-
-    constexpr auto testCases = std::array {
-        TestCase {"valid UTF-8 and locations", testValidUtf8AndLocations},
-        TestCase {"slice", testSlice},
-        TestCase {"UTF-8 BOM diagnostic", testUtf8BomDiagnostic},
-        TestCase {"malformed UTF-8 diagnostic", testMalformedUtf8Diagnostic},
-        TestCase {"line endings and Unicode boundaries", testLineEndingsAndUnicodeBoundaries},
-        TestCase {"invalid UTF-8 cases", testInvalidUtf8Cases},
-        TestCase {"invalid source boundaries", testInvalidSourceBoundaries},
-        TestCase {"BOM before malformed UTF-8", testBomBeforeMalformedUtf8},
-    };
-
-    TestContext tests;
-    for (const auto& testCase : testCases) {
-        tests.beginTest(testCase.name);
-        testCase.function(tests);
-    }
-
-    return tests.exitCode();
-}
