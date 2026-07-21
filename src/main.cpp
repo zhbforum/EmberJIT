@@ -1,6 +1,8 @@
 #include "ember/frontend/ast_printer.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
+#include "ember/semantic/analyzer.hpp"
+#include "ember/semantic/typed_ast_printer.hpp"
 
 #include "ember/support/diagnostic.hpp"
 #include "ember/support/source.hpp"
@@ -14,8 +16,7 @@
 namespace
 {
 
-[[nodiscard]] auto
-diagnosticSeverityName(ember::support::DiagnosticSeverity severity) noexcept
+[[nodiscard]] auto diagnosticSeverityName(ember::support::DiagnosticSeverity severity) noexcept
     -> std::string_view
 {
     using ember::support::DiagnosticSeverity;
@@ -41,13 +42,11 @@ diagnosticSeverityName(ember::support::DiagnosticSeverity severity) noexcept
         return false;
     }
 
-    contents.assign(std::istreambuf_iterator<char>{input},
-                    std::istreambuf_iterator<char>{});
+    contents.assign(std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{});
     return !input.bad();
 }
 
-void printDiagnostic(std::string_view path,
-                     const ember::support::SourceText &source,
+void printDiagnostic(std::string_view path, const ember::support::SourceText &source,
                      const ember::support::Diagnostic &diagnostic)
 {
     const auto location = source.locationAt(diagnostic.primarySpan.begin)
@@ -58,8 +57,8 @@ void printDiagnostic(std::string_view path,
                               });
 
     std::cerr << path << ':' << location.line << ':' << location.column << ": "
-              << diagnosticSeverityName(diagnostic.severity) << '['
-              << diagnostic.code << "]: " << diagnostic.message << '\n';
+              << diagnosticSeverityName(diagnostic.severity) << '[' << diagnostic.code
+              << "]: " << diagnostic.message << '\n';
 }
 
 [[nodiscard]] int dumpTokens(std::string_view path, std::string contents)
@@ -82,8 +81,8 @@ void printDiagnostic(std::string_view path,
 
     for (const auto &token : result.tokens)
     {
-        std::cout << ember::frontend::tokenKindName(token.kind) << " ["
-                  << token.span.begin << ", " << token.span.end << ")\n";
+        std::cout << ember::frontend::tokenKindName(token.kind) << " [" << token.span.begin << ", "
+                  << token.span.end << ")\n";
     }
     return 0;
 }
@@ -119,10 +118,39 @@ void printDiagnostic(std::string_view path,
     return 0;
 }
 
+[[nodiscard]] int dumpTypedAst(std::string_view path, std::string contents)
+{
+    const ember::support::SourceText source{ember::support::SourceId{1}, std::string{path},
+                                            std::move(contents)};
+    const auto lexResult = ember::frontend::Lexer{}.lex(source);
+    if (!lexResult.diagnostics.empty())
+    {
+        for (const auto &diagnostic : lexResult.diagnostics)
+            printDiagnostic(path, source, diagnostic);
+        return 1;
+    }
+    const auto parseResult = ember::frontend::Parser{}.parse(source, lexResult.tokens);
+    if (!parseResult.diagnostics.empty())
+    {
+        for (const auto &diagnostic : parseResult.diagnostics)
+            printDiagnostic(path, source, diagnostic);
+        return 1;
+    }
+    const auto semanticResult =
+        ember::semantic::SemanticAnalyzer{}.analyze(*parseResult.program, source);
+    if (!semanticResult.diagnostics.empty())
+    {
+        for (const auto &diagnostic : semanticResult.diagnostics)
+            printDiagnostic(path, source, diagnostic);
+        return 1;
+    }
+    std::cout << ember::semantic::TypedAstPrinter{}.print(*semanticResult.program, source);
+    return 0;
+}
+
 void printUsage(std::string_view executable)
 {
-    std::cerr << "usage: " << executable
-              << " <dump-tokens|dump-ast> <file>\n";
+    std::cerr << "usage: " << executable << " <dump-tokens|dump-ast|dump-typed-ast> <file>\n";
 }
 
 } // namespace
@@ -138,7 +166,7 @@ int main(int argumentCount, char *arguments[])
     if (argumentCount == 3)
     {
         const std::string_view command{arguments[1]};
-        if (command != "dump-tokens" && command != "dump-ast")
+        if (command != "dump-tokens" && command != "dump-ast" && command != "dump-typed-ast")
         {
             printUsage(arguments[0]);
             return 2;
@@ -159,6 +187,10 @@ int main(int argumentCount, char *arguments[])
         if (command == "dump-ast")
         {
             return dumpAst(path, std::move(contents));
+        }
+        if (command == "dump-typed-ast")
+        {
+            return dumpTypedAst(path, std::move(contents));
         }
     }
 

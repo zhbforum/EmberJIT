@@ -48,11 +48,18 @@ add_library(ember_frontend
 target_link_libraries(ember_frontend PUBLIC ember_support)
 ember_enable_warnings(ember_frontend)
 
+add_library(ember_semantic
+    src/semantic/analyzer.cpp
+    src/semantic/typed_ast_printer.cpp
+)
+target_link_libraries(ember_semantic PUBLIC ember_frontend)
+ember_enable_warnings(ember_semantic)
+
 add_executable(ember
     src/main.cpp
 )
 
-target_link_libraries(ember PRIVATE ember_frontend)
+target_link_libraries(ember PRIVATE ember_semantic)
 ember_enable_warnings(ember)
 
 include(CTest)
@@ -78,15 +85,21 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/invalid_ast.ember"
     )
 
+    set(
+        ember_invalid_typed_ast_fixture
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/invalid_typed_ast.ember"
+    )
+
     add_executable(ember_tests
         tests/test_main.cpp
         tests/support/source_tests.cpp
         tests/frontend/token_tests.cpp
         tests/frontend/lexer_tests.cpp
         tests/frontend/parser_tests.cpp
+        tests/semantic/analyzer_tests.cpp
     )
 
-    target_link_libraries(ember_tests PRIVATE ember_frontend)
+    target_link_libraries(ember_tests PRIVATE ember_semantic)
     target_include_directories(ember_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
     )
@@ -132,6 +145,22 @@ if(BUILD_TESTING)
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_invalid_ast_fixture}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_ast_error.cmake
+    )
+
+    add_test(
+        NAME ember_dump_typed_ast
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_dump_ast_fixture}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_typed_ast_output.cmake
+    )
+
+    add_test(
+        NAME ember_dump_typed_ast_invalid
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_invalid_typed_ast_fixture}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_typed_ast_error.cmake
     )
 
     add_test(

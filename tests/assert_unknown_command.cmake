@@ -13,6 +13,6 @@ if(NOT "${standard_output}" STREQUAL "")
     message(FATAL_ERROR "Unknown command wrote stdout: '${standard_output}'.")
 endif()
 
-if(NOT standard_error MATCHES "usage: .*<dump-tokens\\|dump-ast> <file>")
+if(NOT standard_error MATCHES "usage: .*<dump-tokens\\|dump-ast\\|dump-typed-ast> <file>")
     message(FATAL_ERROR "Unexpected usage output: '${standard_error}'.")
 endif()
