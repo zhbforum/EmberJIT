@@ -1,4 +1,6 @@
+#include "ember/frontend/ast_printer.hpp"
 #include "ember/frontend/lexer.hpp"
+#include "ember/frontend/parser.hpp"
 
 #include "ember/support/diagnostic.hpp"
 #include "ember/support/source.hpp"
@@ -86,9 +88,41 @@ void printDiagnostic(std::string_view path,
     return 0;
 }
 
+[[nodiscard]] int dumpAst(std::string_view path, std::string contents)
+{
+    const ember::support::SourceText source{
+        ember::support::SourceId{1},
+        std::string{path},
+        std::move(contents),
+    };
+    const auto lexResult = ember::frontend::Lexer{}.lex(source);
+    if (!lexResult.diagnostics.empty())
+    {
+        for (const auto &diagnostic : lexResult.diagnostics)
+        {
+            printDiagnostic(path, source, diagnostic);
+        }
+        return 1;
+    }
+
+    const auto parseResult = ember::frontend::Parser{}.parse(source, lexResult.tokens);
+    if (!parseResult.diagnostics.empty())
+    {
+        for (const auto &diagnostic : parseResult.diagnostics)
+        {
+            printDiagnostic(path, source, diagnostic);
+        }
+        return 1;
+    }
+
+    std::cout << ember::frontend::AstPrinter{}.print(*parseResult.program, source);
+    return 0;
+}
+
 void printUsage(std::string_view executable)
 {
-    std::cerr << "usage: " << executable << " dump-tokens <file>\n";
+    std::cerr << "usage: " << executable
+              << " <dump-tokens|dump-ast> <file>\n";
 }
 
 } // namespace
@@ -101,8 +135,15 @@ int main(int argumentCount, char *arguments[])
         return 0;
     }
 
-    if (argumentCount == 3 && std::string_view{arguments[1]} == "dump-tokens")
+    if (argumentCount == 3)
     {
+        const std::string_view command{arguments[1]};
+        if (command != "dump-tokens" && command != "dump-ast")
+        {
+            printUsage(arguments[0]);
+            return 2;
+        }
+
         std::string contents;
         const std::string_view path{arguments[2]};
         if (!readFile(path, contents))
@@ -111,7 +152,14 @@ int main(int argumentCount, char *arguments[])
             return 1;
         }
 
-        return dumpTokens(path, std::move(contents));
+        if (command == "dump-tokens")
+        {
+            return dumpTokens(path, std::move(contents));
+        }
+        if (command == "dump-ast")
+        {
+            return dumpAst(path, std::move(contents));
+        }
     }
 
     printUsage(arguments[0]);

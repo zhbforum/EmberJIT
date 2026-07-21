@@ -40,7 +40,9 @@ target_include_directories(ember_support
 ember_enable_warnings(ember_support)
 
 add_library(ember_frontend
+    src/frontend/ast_printer.cpp
     src/frontend/lexer.cpp
+    src/frontend/parser.cpp
 )
 
 target_link_libraries(ember_frontend PUBLIC ember_support)
@@ -66,11 +68,22 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dump_tokens.ember"
     )
 
+    set(
+        ember_dump_ast_fixture
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dump_ast.ember"
+    )
+
+    set(
+        ember_invalid_ast_fixture
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/invalid_ast.ember"
+    )
+
     add_executable(ember_tests
         tests/test_main.cpp
         tests/support/source_tests.cpp
         tests/frontend/token_tests.cpp
         tests/frontend/lexer_tests.cpp
+        tests/frontend/parser_tests.cpp
     )
 
     target_link_libraries(ember_tests PRIVATE ember_frontend)
@@ -103,6 +116,29 @@ if(BUILD_TESTING)
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_invalid_token_fixture}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_tokens_error.cmake
+    )
+
+    add_test(
+        NAME ember_dump_ast
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_dump_ast_fixture}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_ast_output.cmake
+    )
+
+    add_test(
+        NAME ember_dump_ast_invalid
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_invalid_ast_fixture}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_ast_error.cmake
+    )
+
+    add_test(
+        NAME ember_unknown_command
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_unknown_command.cmake
     )
 
     set_tests_properties(ember_smoke PROPERTIES
