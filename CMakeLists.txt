@@ -55,11 +55,23 @@ add_library(ember_semantic
 target_link_libraries(ember_semantic PUBLIC ember_frontend)
 ember_enable_warnings(ember_semantic)
 
+add_library(ember_bytecode
+    src/bytecode/bytecode.cpp
+)
+target_link_libraries(ember_bytecode PUBLIC ember_semantic)
+ember_enable_warnings(ember_bytecode)
+
+add_library(ember_runtime
+    src/runtime/vm.cpp
+)
+target_link_libraries(ember_runtime PUBLIC ember_bytecode)
+ember_enable_warnings(ember_runtime)
+
 add_executable(ember
     src/main.cpp
 )
 
-target_link_libraries(ember PRIVATE ember_semantic)
+target_link_libraries(ember PRIVATE ember_runtime)
 ember_enable_warnings(ember)
 
 include(CTest)
@@ -97,9 +109,10 @@ if(BUILD_TESTING)
         tests/frontend/lexer_tests.cpp
         tests/frontend/parser_tests.cpp
         tests/semantic/analyzer_tests.cpp
+        tests/bytecode/bytecode_tests.cpp
     )
 
-    target_link_libraries(ember_tests PRIVATE ember_semantic)
+    target_link_libraries(ember_tests PRIVATE ember_runtime)
     target_include_directories(ember_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
     )
