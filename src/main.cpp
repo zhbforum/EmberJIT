@@ -1,6 +1,9 @@
+#include "ember/bytecode/builtins.hpp"
+#include "ember/bytecode/bytecode.hpp"
 #include "ember/frontend/ast_printer.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
+#include "ember/runtime/vm.hpp"
 #include "ember/semantic/analyzer.hpp"
 #include "ember/semantic/typed_ast_printer.hpp"
 
@@ -148,9 +151,110 @@ void printDiagnostic(std::string_view path, const ember::support::SourceText &so
     return 0;
 }
 
+[[nodiscard]] auto analyzeForRuntime(std::string_view path, std::string contents,
+                                     ember::semantic::AnalysisResult &analysis)
+    -> std::optional<ember::support::SourceText>
+{
+    ember::support::SourceText source{ember::support::SourceId{1}, std::string{path},
+                                      std::move(contents)};
+    const auto lexed = ember::frontend::Lexer{}.lex(source);
+    if (!lexed.diagnostics.empty())
+    {
+        for (const auto &d : lexed.diagnostics)
+            printDiagnostic(path, source, d);
+        return std::nullopt;
+    }
+    const auto parsed = ember::frontend::Parser{}.parse(source, lexed.tokens);
+    if (!parsed.diagnostics.empty())
+    {
+        for (const auto &d : parsed.diagnostics)
+            printDiagnostic(path, source, d);
+        return std::nullopt;
+    }
+    ember::semantic::HostFunctionRegistry hosts;
+    if (!ember::bytecode::registerBuiltins(hosts))
+    {
+        std::cerr << "error: unable to initialize runtime built-ins\n";
+        return std::nullopt;
+    }
+    analysis = ember::semantic::SemanticAnalyzer{}.analyze(*parsed.program, source, hosts);
+    if (!analysis.diagnostics.empty())
+    {
+        for (const auto &d : analysis.diagnostics)
+            printDiagnostic(path, source, d);
+        return std::nullopt;
+    }
+    return source;
+}
+
+[[nodiscard]] int dumpBytecode(std::string_view path, std::string contents)
+{
+    ember::semantic::AnalysisResult analysis;
+    if (!analyzeForRuntime(path, std::move(contents), analysis))
+        return 1;
+    auto compiled = ember::bytecode::Compiler{}.compile(*analysis.program);
+    if (!compiled.program)
+    {
+        for (const auto &diagnostic : compiled.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+    auto checked = ember::bytecode::Verifier{}.verify(std::move(*compiled.program));
+    if (!checked.program)
+    {
+        for (const auto &diagnostic : checked.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+    std::cout << ember::bytecode::dump(*checked.program);
+    return 0;
+}
+
+[[nodiscard]] int runVm(std::string_view path, std::string contents)
+{
+    ember::semantic::AnalysisResult analysis;
+    if (!analyzeForRuntime(path, std::move(contents), analysis))
+        return 1;
+    auto compiled = ember::bytecode::Compiler{}.compile(*analysis.program);
+    if (!compiled.program)
+    {
+        for (const auto &diagnostic : compiled.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+    auto checked = ember::bytecode::Verifier{}.verify(std::move(*compiled.program));
+    if (!checked.program)
+    {
+        for (const auto &diagnostic : checked.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+    auto vm = ember::runtime::VirtualMachine::create(std::move(*checked.program));
+    const auto main = std::find_if(
+        analysis.program->functions.begin(), analysis.program->functions.end(),
+        [](const auto &function)
+        {
+            return function.name == "main" && function.kind == ember::semantic::FunctionKind::user;
+        });
+    if (main == analysis.program->functions.end())
+    {
+        std::cerr << "error: missing main function\n";
+        return 1;
+    }
+    const auto result = vm.execute(main->id);
+    if (result.error)
+    {
+        std::cerr << "runtime error[" << result.error->code << "]: " << result.error->message
+                  << '\n';
+        return 1;
+    }
+    return 0;
+}
+
 void printUsage(std::string_view executable)
 {
-    std::cerr << "usage: " << executable << " <dump-tokens|dump-ast|dump-typed-ast> <file>\n";
+    std::cerr << "usage: " << executable
+              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode|run --no-jit> <file>\n";
 }
 
 } // namespace
@@ -163,10 +267,20 @@ int main(int argumentCount, char *arguments[])
         return 0;
     }
 
+    if (argumentCount == 4 && std::string_view{arguments[1]} == "run" &&
+        std::string_view{arguments[2]} == "--no-jit")
+    {
+        std::string contents;
+        const std::string_view path{arguments[3]};
+        if (!readFile(path, contents))
+            return 1;
+        return runVm(path, std::move(contents));
+    }
     if (argumentCount == 3)
     {
         const std::string_view command{arguments[1]};
-        if (command != "dump-tokens" && command != "dump-ast" && command != "dump-typed-ast")
+        if (command != "dump-tokens" && command != "dump-ast" && command != "dump-typed-ast" &&
+            command != "dump-bytecode")
         {
             printUsage(arguments[0]);
             return 2;
@@ -192,6 +306,8 @@ int main(int argumentCount, char *arguments[])
         {
             return dumpTypedAst(path, std::move(contents));
         }
+        if (command == "dump-bytecode")
+            return dumpBytecode(path, std::move(contents));
     }
 
     printUsage(arguments[0]);
