@@ -77,29 +77,78 @@ ember_enable_warnings(ember)
 include(CTest)
 
 if(BUILD_TESTING)
+    set(ember_example_directory "${CMAKE_CURRENT_SOURCE_DIR}/examples")
+    set(ember_fixture_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    set(ember_test_script_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+
     set(
         ember_invalid_token_fixture
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/invalid_token.ember"
+        "${ember_fixture_directory}/invalid_token.ember"
     )
 
     set(
         ember_dump_tokens_fixture
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dump_tokens.ember"
+        "${ember_fixture_directory}/dump_tokens.ember"
     )
 
     set(
         ember_dump_ast_fixture
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dump_ast.ember"
+        "${ember_fixture_directory}/dump_ast.ember"
     )
 
     set(
         ember_invalid_ast_fixture
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/invalid_ast.ember"
+        "${ember_fixture_directory}/invalid_ast.ember"
     )
 
     set(
         ember_invalid_typed_ast_fixture
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/invalid_typed_ast.ember"
+        "${ember_fixture_directory}/invalid_typed_ast.ember"
+    )
+
+    set(
+        ember_vm_runtime_fixture
+        "${ember_fixture_directory}/vm_runtime.ember"
+    )
+
+    set(
+        ember_invalid_main_signature_fixture
+        "${ember_fixture_directory}/invalid_main_signature.ember"
+    )
+
+    set(
+        ember_invalid_main_return_fixture
+        "${ember_fixture_directory}/invalid_main_return.ember"
+    )
+
+    set(
+        ember_missing_main_fixture
+        "${ember_fixture_directory}/missing_main.ember"
+    )
+
+    set(
+        ember_main_i64_success_fixture
+        "${ember_fixture_directory}/main_i64_success.ember"
+    )
+
+    set(
+        ember_vm_runtime_expected_output
+        "${ember_fixture_directory}/vm_runtime.expected"
+    )
+
+    set(
+        ember_vm_factorial_expected_output
+        "${ember_fixture_directory}/vm_factorial.expected"
+    )
+
+    set(
+        ember_vm_fibonacci_expected_output
+        "${ember_fixture_directory}/vm_fibonacci.expected"
+    )
+
+    set(
+        ember_vm_hot_loop_expected_output
+        "${ember_fixture_directory}/vm_hot_loop.expected"
     )
 
     add_executable(ember_tests
@@ -133,7 +182,7 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_dump_tokens_fixture}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_tokens_output.cmake
+            -P ${ember_test_script_directory}/assert_dump_tokens_output.cmake
     )
 
     add_test(
@@ -141,7 +190,7 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_invalid_token_fixture}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_tokens_error.cmake
+            -P ${ember_test_script_directory}/assert_dump_tokens_error.cmake
     )
 
     add_test(
@@ -149,7 +198,7 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_dump_ast_fixture}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_ast_output.cmake
+            -P ${ember_test_script_directory}/assert_dump_ast_output.cmake
     )
 
     add_test(
@@ -157,7 +206,7 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_invalid_ast_fixture}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_ast_error.cmake
+            -P ${ember_test_script_directory}/assert_dump_ast_error.cmake
     )
 
     add_test(
@@ -165,7 +214,7 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_dump_ast_fixture}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_typed_ast_output.cmake
+            -P ${ember_test_script_directory}/assert_dump_typed_ast_output.cmake
     )
 
     add_test(
@@ -173,14 +222,85 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_invalid_typed_ast_fixture}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_dump_typed_ast_error.cmake
+            -P ${ember_test_script_directory}/assert_dump_typed_ast_error.cmake
     )
 
     add_test(
         NAME ember_unknown_command
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_unknown_command.cmake
+            -P ${ember_test_script_directory}/assert_unknown_command.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_vm_runtime_fixture}
+            -DEXPECTED_OUTPUT_FILE=${ember_vm_runtime_expected_output}
+            -P ${ember_test_script_directory}/assert_run_vm_output.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_invalid_main_signature
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_invalid_main_signature_fixture}
+            -DEXPECTED_ERROR_PATTERN=must.not.accept.parameters
+            -P ${ember_test_script_directory}/assert_run_vm_error.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_invalid_main_return
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_invalid_main_return_fixture}
+            -DEXPECTED_ERROR_PATTERN=must.return.void.or.i64
+            -P ${ember_test_script_directory}/assert_run_vm_error.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_missing_main
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_missing_main_fixture}
+            -DEXPECTED_ERROR_PATTERN=missing.user.entry.function
+            -P ${ember_test_script_directory}/assert_run_vm_error.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_main_i64_success
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_main_i64_success_fixture}
+            -P ${ember_test_script_directory}/assert_run_vm_success.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_factorial
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_example_directory}/vm_factorial.ember
+            -DEXPECTED_OUTPUT_FILE=${ember_vm_factorial_expected_output}
+            -P ${ember_test_script_directory}/assert_run_vm_output.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_fibonacci
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_example_directory}/vm_fibonacci.ember
+            -DEXPECTED_OUTPUT_FILE=${ember_vm_fibonacci_expected_output}
+            -P ${ember_test_script_directory}/assert_run_vm_output.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_hot_loop
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_example_directory}/vm_hot_loop.ember
+            -DEXPECTED_OUTPUT_FILE=${ember_vm_hot_loop_expected_output}
+            -P ${ember_test_script_directory}/assert_run_vm_output.cmake
     )
 
     set_tests_properties(ember_smoke PROPERTIES

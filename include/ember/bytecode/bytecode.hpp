@@ -101,6 +101,7 @@ struct VerifyResult
 class Compiler
 {
   public:
+    // Precondition: program was returned successfully by SemanticAnalyzer.
     [[nodiscard]] CompileResult compile(const semantic::TypedProgram &program) const;
 };
 class Verifier

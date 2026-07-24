@@ -38,6 +38,35 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  linux-sanitizers:
+    name: Linux / Clang sanitizers
+    runs-on: ubuntu-24.04
+
+    env:
+      CC: clang
+      CXX: clang++
+
+    steps:
+      - name: Checkout repository
+        # v6.1.0; full SHA prevents a mutable tag from changing the executed code.
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Configure
+        run: >
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   windows:
     name: Windows / MSVC
     runs-on: windows-2025

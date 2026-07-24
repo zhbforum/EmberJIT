@@ -64,6 +64,17 @@ void printDiagnostic(std::string_view path, const ember::support::SourceText &so
               << "]: " << diagnostic.message << '\n';
 }
 
+void printEntryPointDiagnostic(std::string_view path, const ember::support::SourceText &source,
+                               ember::support::SourceSpan span, std::string message)
+{
+    printDiagnostic(path, source,
+                    {.stage = ember::support::DiagnosticStage::runtime,
+                     .severity = ember::support::DiagnosticSeverity::error,
+                     .code = "E5001",
+                     .message = std::move(message),
+                     .primarySpan = span});
+}
+
 [[nodiscard]] int dumpTokens(std::string_view path, std::string contents)
 {
     const ember::support::SourceText source{
@@ -213,8 +224,36 @@ void printDiagnostic(std::string_view path, const ember::support::SourceText &so
 [[nodiscard]] int runVm(std::string_view path, std::string contents)
 {
     ember::semantic::AnalysisResult analysis;
-    if (!analyzeForRuntime(path, std::move(contents), analysis))
+    const auto source = analyzeForRuntime(path, std::move(contents), analysis);
+    if (!source)
         return 1;
+
+    const auto entry = std::find_if(
+        analysis.program->declarations.begin(), analysis.program->declarations.end(),
+        [](const auto &function) { return function.name == "main"; });
+    if (entry == analysis.program->declarations.end())
+    {
+        printEntryPointDiagnostic(path, *source,
+                                  {.source = source->id(),
+                                   .begin = source->size(),
+                                   .end = source->size()},
+                                  "missing user entry function 'main'");
+        return 1;
+    }
+    if (!entry->signature.parameterTypes.empty())
+    {
+        printEntryPointDiagnostic(path, *source, entry->nameSpan,
+                                  "entry function 'main' must not accept parameters");
+        return 1;
+    }
+    if (entry->signature.returnType != ember::semantic::Type::voidType &&
+        entry->signature.returnType != ember::semantic::Type::i64)
+    {
+        printEntryPointDiagnostic(path, *source, entry->nameSpan,
+                                  "entry function 'main' must return void or i64");
+        return 1;
+    }
+
     auto compiled = ember::bytecode::Compiler{}.compile(*analysis.program);
     if (!compiled.program)
     {
@@ -230,18 +269,7 @@ void printDiagnostic(std::string_view path, const ember::support::SourceText &so
         return 1;
     }
     auto vm = ember::runtime::VirtualMachine::create(std::move(*checked.program));
-    const auto main = std::find_if(
-        analysis.program->functions.begin(), analysis.program->functions.end(),
-        [](const auto &function)
-        {
-            return function.name == "main" && function.kind == ember::semantic::FunctionKind::user;
-        });
-    if (main == analysis.program->functions.end())
-    {
-        std::cerr << "error: missing main function\n";
-        return 1;
-    }
-    const auto result = vm.execute(main->id);
+    const auto result = vm.execute(entry->id);
     if (result.error)
     {
         std::cerr << "runtime error[" << result.error->code << "]: " << result.error->message

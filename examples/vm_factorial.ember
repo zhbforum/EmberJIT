@@ -1,1 +1,12 @@
-fn main() -> i64 { let n: i64 = 5; let r: i64 = 1; while n > 1 { r = r * n; n = n - 1; } return r; }
+fn main() -> void {
+    let n: i64 = 5;
+    let result: i64 = 1;
+
+    while n > 1 {
+        result = result * n;
+        n = n - 1;
+    }
+
+    print_i64(result);
+    return;
+}
