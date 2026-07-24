@@ -1,0 +1,12 @@
+fn main() -> void {
+    let index: i64 = 0;
+    let sum: i64 = 0;
+
+    while index < 10000 {
+        sum = sum + index;
+        index = index + 1;
+    }
+
+    print_i64(sum);
+    return;
+}

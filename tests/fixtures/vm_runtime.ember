@@ -1,0 +1,16 @@
+fn emit(value: bool) -> void {
+    if value {
+        print_i64(1);
+    } else {
+        print_i64(0);
+    }
+
+    return;
+}
+
+fn main() -> void {
+    let ratio: f64 = -3.5 / 2.0;
+    emit(ratio == -1.75);
+    print_f64(ratio);
+    return;
+}
