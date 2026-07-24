@@ -500,7 +500,8 @@ class Analyzer
             fail(node.operatorSpan, "E3008", "unary operator requires i64 or f64 operand");
             return nullptr;
         }
-        return makeExpression(span, operand->type,
+        const auto type = operand->type;
+        return makeExpression(span, type,
                               TypedUnaryExpression{.operation = node.operation,
                                                    .operatorSpan = node.operatorSpan,
                                                    .operand = std::move(operand)});
