@@ -61,6 +61,15 @@ add_library(ember_bytecode
 target_link_libraries(ember_bytecode PUBLIC ember_semantic)
 ember_enable_warnings(ember_bytecode)
 
+add_library(ember_ir
+    src/ir/ir.cpp
+    src/ir/verifier.cpp
+    src/ir/bytecode_lowerer.cpp
+    src/ir/dump.cpp
+)
+target_link_libraries(ember_ir PUBLIC ember_bytecode)
+ember_enable_warnings(ember_ir)
+
 add_library(ember_runtime
     src/runtime/runtime_dispatcher.cpp
     src/runtime/runtime_function.cpp
@@ -74,7 +83,7 @@ add_executable(ember
     src/main.cpp
 )
 
-target_link_libraries(ember PRIVATE ember_runtime)
+target_link_libraries(ember PRIVATE ember_runtime ember_ir)
 ember_enable_warnings(ember)
 
 option(EMBER_BUILD_BENCHMARKS "Build Ember runtime benchmarks" OFF)
@@ -107,6 +116,11 @@ if(BUILD_TESTING)
     set(
         ember_dump_ast_fixture
         "${ember_fixture_directory}/dump_ast.ember"
+    )
+
+    set(
+        ember_dump_ir_fixture
+        "${ember_fixture_directory}/dump_ir.ember"
     )
 
     set(
@@ -177,10 +191,11 @@ if(BUILD_TESTING)
         tests/frontend/parser_tests.cpp
         tests/semantic/analyzer_tests.cpp
         tests/bytecode/bytecode_tests.cpp
+        tests/ir/ir_tests.cpp
         tests/runtime/runtime_tests.cpp
     )
 
-    target_link_libraries(ember_tests PRIVATE ember_runtime)
+    target_link_libraries(ember_tests PRIVATE ember_runtime ember_ir)
     target_include_directories(ember_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
     )
@@ -242,6 +257,14 @@ if(BUILD_TESTING)
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_invalid_typed_ast_fixture}
             -P ${ember_test_script_directory}/assert_dump_typed_ast_error.cmake
+    )
+
+    add_test(
+        NAME ember_dump_ir
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_dump_ir_fixture}
+            -P ${ember_test_script_directory}/assert_dump_ir_output.cmake
     )
 
     add_test(
