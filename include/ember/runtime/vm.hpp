@@ -19,8 +19,9 @@ struct ExecutionResult
     std::optional<RuntimeError> error;
 };
 
-// The constructor is deliberately private:
-// execution is possible only after verification.
+// The constructor is deliberately private: execution is possible only after
+// verification.
+// The VM trusts verified bytecode and is not a security sandbox.
 class VirtualMachine
 {
   public:

@@ -12,9 +12,9 @@ namespace ember::bytecode
 {
 enum class BuiltinKind : std::uint32_t
 {
-    printI64,
-    printF64,
-    clockMs,
+    printI64 = 0,
+    printF64 = 1,
+    clockMs = 2,
 };
 
 struct BuiltinDescriptor
