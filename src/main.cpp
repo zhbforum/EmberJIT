@@ -10,14 +10,24 @@
 #include "ember/support/diagnostic.hpp"
 #include "ember/support/source.hpp"
 
+#include <charconv>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace
 {
+struct RunOptions
+{
+    std::uint64_t hotThreshold{1000};
+    bool traceJit{};
+    bool jitEnabled{true};
+};
 
 [[nodiscard]] auto diagnosticSeverityName(ember::support::DiagnosticSeverity severity) noexcept
     -> std::string_view
@@ -221,7 +231,7 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
     return 0;
 }
 
-[[nodiscard]] int runVm(std::string_view path, std::string contents)
+[[nodiscard]] int runVm(std::string_view path, std::string contents, const RunOptions &options)
 {
     ember::semantic::AnalysisResult analysis;
     const auto source = analyzeForRuntime(path, std::move(contents), analysis);
@@ -268,11 +278,33 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
             std::cerr << "bytecode error: " << diagnostic.message << '\n';
         return 1;
     }
-    auto vm = ember::runtime::VirtualMachine::create(std::move(*checked.program));
-    const auto result = vm.execute(entry->id);
-    if (result.error)
+    ember::runtime::RuntimeOptions runtimeOptions{
+        .hotThreshold = options.hotThreshold,
+        .jitEnabled = options.jitEnabled,
+        .profilingEnabled = true,
+    };
+    auto vm = ember::runtime::VirtualMachine::create(std::move(*checked.program),
+                                                      std::move(runtimeOptions));
+    const auto report = vm.execute(entry->id);
+    if (options.traceJit)
     {
-        std::cerr << "runtime error[" << result.error->code << "]: " << result.error->message
+        std::unordered_map<ember::semantic::FunctionId, std::string> functionNames;
+        functionNames.reserve(analysis.program->declarations.size());
+        for (const auto &function : analysis.program->declarations)
+            functionNames.emplace(function.id, function.name);
+
+        for (const auto &event : report.hotEvents)
+        {
+            const auto name = functionNames.find(event.functionId);
+            std::cerr << "[jit] function "
+                      << (name == functionNames.end() ? "<unknown>" : name->second)
+                      << " became hot after " << event.invocationCount << " calls\n";
+        }
+    }
+    if (report.result.error)
+    {
+        std::cerr << "runtime error[" << report.result.error->code << "]: "
+                  << report.result.error->message
                   << '\n';
         return 1;
     }
@@ -282,7 +314,65 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
 void printUsage(std::string_view executable)
 {
     std::cerr << "usage: " << executable
-              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode|run --no-jit> <file>\n";
+              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode> <file>\n"
+              << "       " << executable
+              << " run [--no-jit] [--jit-threshold=<non-negative-integer>] [--trace-jit] <file>\n";
+}
+
+[[nodiscard]] bool parseHotThreshold(std::string_view text, std::uint64_t &threshold)
+{
+    std::uint64_t parsed{};
+    const auto [position, error] = std::from_chars(text.data(), text.data() + text.size(), parsed);
+    if (error != std::errc{} || position != text.data() + text.size())
+        return false;
+    threshold = parsed;
+    return true;
+}
+
+[[nodiscard]] std::optional<RunOptions> parseRunOptions(int argumentCount, char *arguments[],
+                                                         std::string_view &path)
+{
+    RunOptions options;
+    bool thresholdSpecified{};
+    bool traceSpecified{};
+    bool noJitSpecified{};
+
+    for (int index = 2; index < argumentCount; ++index)
+    {
+        const std::string_view argument{arguments[index]};
+        if (argument == "--no-jit")
+        {
+            if (noJitSpecified)
+                return std::nullopt;
+            noJitSpecified = true;
+            options.jitEnabled = false;
+            continue;
+        }
+        if (argument == "--trace-jit")
+        {
+            if (traceSpecified)
+                return std::nullopt;
+            traceSpecified = true;
+            options.traceJit = true;
+            continue;
+        }
+        constexpr std::string_view thresholdPrefix{"--jit-threshold="};
+        if (argument.starts_with(thresholdPrefix))
+        {
+            if (thresholdSpecified ||
+                !parseHotThreshold(argument.substr(thresholdPrefix.size()), options.hotThreshold))
+            {
+                return std::nullopt;
+            }
+            thresholdSpecified = true;
+            continue;
+        }
+        if (argument.starts_with("--") || !path.empty())
+            return std::nullopt;
+        path = argument;
+    }
+
+    return path.empty() ? std::nullopt : std::optional<RunOptions>{options};
 }
 
 } // namespace
@@ -295,14 +385,22 @@ int main(int argumentCount, char *arguments[])
         return 0;
     }
 
-    if (argumentCount == 4 && std::string_view{arguments[1]} == "run" &&
-        std::string_view{arguments[2]} == "--no-jit")
+    if (argumentCount >= 3 && std::string_view{arguments[1]} == "run")
     {
+        std::string_view path;
+        const auto options = parseRunOptions(argumentCount, arguments, path);
+        if (!options)
+        {
+            printUsage(arguments[0]);
+            return 2;
+        }
         std::string contents;
-        const std::string_view path{arguments[3]};
         if (!readFile(path, contents))
+        {
+            std::cerr << "error: unable to read source file '" << path << "'\n";
             return 1;
-        return runVm(path, std::move(contents));
+        }
+        return runVm(path, std::move(contents), *options);
     }
     if (argumentCount == 3)
     {

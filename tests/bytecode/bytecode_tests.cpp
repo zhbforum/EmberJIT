@@ -59,7 +59,7 @@ EMBER_TEST("bytecode lowers loops and VM executes i64 arithmetic")
         return;
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId);
-    tests.expect(result.value.has_value() && std::get<std::int64_t>(*result.value) == 120,
+    tests.expect(result.result.value.has_value() && std::get<std::int64_t>(*result.result.value) == 120,
                  "factorial executes");
 }
 EMBER_TEST("VM uses explicit frames for recursive calls")
@@ -78,7 +78,7 @@ EMBER_TEST("VM uses explicit frames for recursive calls")
         return;
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId);
-    tests.expect(result.value.has_value() && std::get<std::int64_t>(*result.value) == 40320,
+    tests.expect(result.result.value.has_value() && std::get<std::int64_t>(*result.result.value) == 40320,
                  "recursive function executes through VM frames");
 }
 EMBER_TEST("verifier rejects malformed jump before VM construction")
@@ -133,7 +133,7 @@ EMBER_TEST("VM reports integer division runtime errors")
     }
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId);
-    tests.expect(result.error.has_value() && result.error->code == "R5004",
+    tests.expect(result.result.error.has_value() && result.result.error->code == "R5004",
                  "division by zero is a runtime error");
 
     auto overflowCompiled =
@@ -152,7 +152,7 @@ EMBER_TEST("VM reports integer division runtime errors")
     }
     auto overflowVm = ember::runtime::VirtualMachine::create(std::move(*overflowVerified.program));
     const auto overflowResult = overflowVm.execute(overflowCompiled.mainId);
-    tests.expect(overflowResult.error.has_value() && overflowResult.error->code == "R5004",
+    tests.expect(overflowResult.result.error.has_value() && overflowResult.result.error->code == "R5004",
                  "INT64_MIN divided by minus one is a runtime error");
 }
 
@@ -177,9 +177,10 @@ EMBER_TEST("VM executes f64, bool, and void functions")
     }
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId);
-    tests.expect(result.value.has_value() &&
-                     std::holds_alternative<std::int64_t>(*result.value) &&
-                     std::get<std::int64_t>(*result.value) == 1 && !result.error.has_value(),
+    tests.expect(result.result.value.has_value() &&
+                     std::holds_alternative<std::int64_t>(*result.result.value) &&
+                     std::get<std::int64_t>(*result.result.value) == 1 &&
+                     !result.result.error.has_value(),
                  "f64 arithmetic and boolean branch produce the expected result");
 }
 
@@ -199,8 +200,9 @@ EMBER_TEST("VM executes registered clock builtin")
     }
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId);
-    tests.expect(result.value.has_value() && std::holds_alternative<std::int64_t>(*result.value) &&
-                     !result.error.has_value(),
+    tests.expect(result.result.value.has_value() &&
+                     std::holds_alternative<std::int64_t>(*result.result.value) &&
+                     !result.result.error.has_value(),
                  "clock builtin returns an i64 value");
 }
 
@@ -220,7 +222,7 @@ EMBER_TEST("VM validates its public entry-point arguments")
     }
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId, {true});
-    tests.expect(result.error.has_value() && result.error->code == "R5002",
+    tests.expect(result.result.error.has_value() && result.result.error->code == "R5002",
                  "invalid entry arguments are a runtime error");
 }
 
@@ -248,7 +250,8 @@ EMBER_TEST("verifier preserves unary and boolean opcode semantics")
         return;
     auto unaryVm = ember::runtime::VirtualMachine::create(std::move(*unaryVerified.program));
     const auto unaryResult = unaryVm.execute(0);
-    tests.expect(unaryResult.value.has_value() && std::get<std::int64_t>(*unaryResult.value) == -1,
+    tests.expect(unaryResult.result.value.has_value() &&
+                     std::get<std::int64_t>(*unaryResult.result.value) == -1,
                  "i64 unary negation executes");
 
     auto boolean = compile("fn main() -> bool { return true == false; }");
@@ -459,7 +462,8 @@ EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero")
     auto recursiveVm =
         ember::runtime::VirtualMachine::create(std::move(*recursiveVerified.program));
     const auto recursiveResult = recursiveVm.execute(0);
-    tests.expect(recursiveResult.error.has_value() && recursiveResult.error->code == "R5006",
+    tests.expect(recursiveResult.result.error.has_value() &&
+                     recursiveResult.result.error->code == "R5006",
                  "frame limit is a defined runtime error");
 
     ember::bytecode::Program targetZero{
@@ -501,8 +505,8 @@ EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero")
     auto targetZeroVm =
         ember::runtime::VirtualMachine::create(std::move(*targetZeroVerified.program));
     const auto targetZeroResult = targetZeroVm.execute(0, {std::int64_t{2}});
-    tests.expect(targetZeroResult.value.has_value() &&
-                     std::get<std::int64_t>(*targetZeroResult.value) == 0,
+    tests.expect(targetZeroResult.result.value.has_value() &&
+                     std::get<std::int64_t>(*targetZeroResult.result.value) == 0,
                  "backward jump to instruction zero executes");
 }
 } // namespace

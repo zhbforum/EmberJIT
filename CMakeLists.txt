@@ -62,6 +62,9 @@ target_link_libraries(ember_bytecode PUBLIC ember_semantic)
 ember_enable_warnings(ember_bytecode)
 
 add_library(ember_runtime
+    src/runtime/runtime_dispatcher.cpp
+    src/runtime/runtime_function.cpp
+    src/runtime/runtime_function_table.cpp
     src/runtime/vm.cpp
 )
 target_link_libraries(ember_runtime PUBLIC ember_bytecode)
@@ -73,6 +76,16 @@ add_executable(ember
 
 target_link_libraries(ember PRIVATE ember_runtime)
 ember_enable_warnings(ember)
+
+option(EMBER_BUILD_BENCHMARKS "Build Ember runtime benchmarks" OFF)
+
+if(EMBER_BUILD_BENCHMARKS)
+    add_executable(ember_runtime_benchmark
+        benchmarks/runtime_dispatch_benchmark.cpp
+    )
+    target_link_libraries(ember_runtime_benchmark PRIVATE ember_runtime)
+    ember_enable_warnings(ember_runtime_benchmark)
+endif()
 
 include(CTest)
 
@@ -151,6 +164,11 @@ if(BUILD_TESTING)
         "${ember_fixture_directory}/vm_hot_loop.expected"
     )
 
+    set(
+        ember_vm_hot_loop_expected_trace
+        "${ember_fixture_directory}/vm_hot_loop.trace.expected"
+    )
+
     add_executable(ember_tests
         tests/test_main.cpp
         tests/support/source_tests.cpp
@@ -159,6 +177,7 @@ if(BUILD_TESTING)
         tests/frontend/parser_tests.cpp
         tests/semantic/analyzer_tests.cpp
         tests/bytecode/bytecode_tests.cpp
+        tests/runtime/runtime_tests.cpp
     )
 
     target_link_libraries(ember_tests PRIVATE ember_runtime)
@@ -301,6 +320,34 @@ if(BUILD_TESTING)
             -DSOURCE_FILE=${ember_example_directory}/vm_hot_loop.ember
             -DEXPECTED_OUTPUT_FILE=${ember_vm_hot_loop_expected_output}
             -P ${ember_test_script_directory}/assert_run_vm_output.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_hot_loop_trace
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_example_directory}/vm_hot_loop.ember
+            -DEXPECTED_OUTPUT_FILE=${ember_vm_hot_loop_expected_output}
+            -DEXPECTED_TRACE_FILE=${ember_vm_hot_loop_expected_trace}
+            -DJIT_THRESHOLD=3
+            -P ${ember_test_script_directory}/assert_run_vm_trace.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_threshold_zero
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_example_directory}/vm_hot_loop.ember
+            -DEXPECTED_OUTPUT_FILE=${ember_vm_hot_loop_expected_output}
+            -P ${ember_test_script_directory}/assert_run_vm_threshold_zero.cmake
+    )
+
+    add_test(
+        NAME ember_run_vm_invalid_options
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_example_directory}/vm_hot_loop.ember
+            -P ${ember_test_script_directory}/assert_run_option_errors.cmake
     )
 
     set_tests_properties(ember_smoke PROPERTIES

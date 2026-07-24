@@ -1,9 +1,13 @@
+fn hot_loop(value: i64) -> i64 {
+    return value;
+}
+
 fn main() -> void {
     let index: i64 = 0;
     let sum: i64 = 0;
 
     while index < 10000 {
-        sum = sum + index;
+        sum = sum + hot_loop(index);
         index = index + 1;
     }
 
