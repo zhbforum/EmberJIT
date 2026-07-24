@@ -3,6 +3,8 @@
 #include "ember/frontend/ast_printer.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
+#include "ember/ir/bytecode_lowerer.hpp"
+#include "ember/ir/dump.hpp"
 #include "ember/runtime/vm.hpp"
 #include "ember/semantic/analyzer.hpp"
 #include "ember/semantic/typed_ast_printer.hpp"
@@ -19,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace
 {
@@ -231,6 +234,70 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
     return 0;
 }
 
+[[nodiscard]] int dumpIr(std::string_view path, std::string contents)
+{
+    ember::semantic::AnalysisResult analysis;
+    if (!analyzeForRuntime(path, std::move(contents), analysis))
+        return 1;
+    auto compiled = ember::bytecode::Compiler{}.compile(*analysis.program);
+    if (!compiled.program)
+    {
+        for (const auto &diagnostic : compiled.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+    auto checked = ember::bytecode::Verifier{}.verify(std::move(*compiled.program));
+    if (!checked.program)
+    {
+        for (const auto &diagnostic : checked.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+
+    struct FunctionLowering
+    {
+        ember::semantic::FunctionId id;
+        ember::ir::LoweringResult result;
+    };
+    std::vector<FunctionLowering> loweredFunctions;
+    for (const auto &function : checked.program->program().functions)
+    {
+        if (function.kind != ember::semantic::FunctionKind::user)
+            continue;
+        loweredFunctions.push_back(
+            {.id = function.id, .result = ember::ir::Lowerer{}.lower(*checked.program, function.id)});
+    }
+    for (const auto &lowered : loweredFunctions)
+    {
+        if (!lowered.result.function &&
+            lowered.result.failure != ember::ir::LoweringFailure::unsupported)
+        {
+            if (lowered.result.diagnostics.empty())
+            {
+                std::cerr << "IR lowering error: failed without a diagnostic\n";
+                return 1;
+            }
+            for (const auto &diagnostic : lowered.result.diagnostics)
+                std::cerr << "IR lowering error[" << diagnostic.code << "]: "
+                          << diagnostic.message << '\n';
+            return 1;
+        }
+    }
+    for (const auto &lowered : loweredFunctions)
+    {
+        if (lowered.result.function)
+        {
+            std::cout << ember::ir::dump(*lowered.result.function);
+            continue;
+        }
+        const auto message = lowered.result.diagnostics.empty()
+                                 ? "unsupported native i64 form"
+                                 : lowered.result.diagnostics.front().message;
+        std::cout << "fn #" << lowered.id << ": not lowered (" << message << ")\n";
+    }
+    return 0;
+}
+
 [[nodiscard]] int runVm(std::string_view path, std::string contents, const RunOptions &options)
 {
     ember::semantic::AnalysisResult analysis;
@@ -314,7 +381,7 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
 void printUsage(std::string_view executable)
 {
     std::cerr << "usage: " << executable
-              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode> <file>\n"
+              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode|dump-ir> <file>\n"
               << "       " << executable
               << " run [--no-jit] [--jit-threshold=<non-negative-integer>] [--trace-jit] <file>\n";
 }
@@ -406,7 +473,7 @@ int main(int argumentCount, char *arguments[])
     {
         const std::string_view command{arguments[1]};
         if (command != "dump-tokens" && command != "dump-ast" && command != "dump-typed-ast" &&
-            command != "dump-bytecode")
+            command != "dump-bytecode" && command != "dump-ir")
         {
             printUsage(arguments[0]);
             return 2;
@@ -434,6 +501,8 @@ int main(int argumentCount, char *arguments[])
         }
         if (command == "dump-bytecode")
             return dumpBytecode(path, std::move(contents));
+        if (command == "dump-ir")
+            return dumpIr(path, std::move(contents));
     }
 
     printUsage(arguments[0]);
