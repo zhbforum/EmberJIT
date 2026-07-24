@@ -6,7 +6,7 @@
 #include <chrono>
 #include <iostream>
 #include <limits>
-#include <unordered_map>
+#include <utility>
 
 namespace ember::runtime
 {
@@ -16,7 +16,7 @@ constexpr std::size_t maximumFrameCount = 4096;
 
 struct Frame
 {
-    const bytecode::Function *function;
+    const RuntimeFunction *function;
     std::size_t pc{};
     // Values below this boundary belong to suspended caller expressions.
     std::size_t stackBase{};
@@ -26,13 +26,6 @@ struct Frame
 [[nodiscard]] ExecutionResult fail(std::string code, std::string message)
 {
     return {.value = std::nullopt, .error = RuntimeError{std::move(code), std::move(message)}};
-}
-
-[[nodiscard]] auto valueMatches(bytecode::Value const &value, semantic::Type type) -> bool
-{
-    return (type == semantic::Type::i64 && std::holds_alternative<std::int64_t>(value)) ||
-           (type == semantic::Type::f64 && std::holds_alternative<double>(value)) ||
-           (type == semantic::Type::boolean && std::holds_alternative<bool>(value));
 }
 
 [[nodiscard]] auto wrapAdd(std::int64_t left, std::int64_t right) -> std::int64_t
@@ -52,46 +45,50 @@ struct Frame
 }
 } // namespace
 
-VirtualMachine VirtualMachine::create(bytecode::VerifiedProgram verifiedProgram)
+VirtualMachine::VirtualMachine(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options)
+    : options_(std::move(options)), functions_(std::move(verifiedProgram)) {}
+
+VirtualMachine VirtualMachine::create(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options)
 {
-    return VirtualMachine{std::move(verifiedProgram).takeProgram()};
+    return VirtualMachine{std::move(verifiedProgram), std::move(options)};
 }
 
-ExecutionResult VirtualMachine::execute(semantic::FunctionId entry,
-                                        const std::vector<bytecode::Value> &arguments) const
+const RuntimeFunction *VirtualMachine::function(semantic::FunctionId id) const noexcept
 {
-    std::unordered_map<semantic::FunctionId, const bytecode::Function *> functions;
-    for (const auto &function : program_.functions)
-        functions.emplace(function.id, &function);
+    return functions_.find(id);
+}
 
-    const auto createFrame = [&](semantic::FunctionId id,
-                                 const std::vector<bytecode::Value> &arguments,
-                                 std::size_t stackBase) -> std::optional<Frame>
+ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
+                                        const std::vector<bytecode::Value> &arguments)
+{
+    std::vector<HotFunctionEvent> hotEvents;
+    RuntimeDispatcher dispatcher{functions_, options_, hotEvents};
+    const auto failExecution = [&hotEvents](std::string code, std::string message) -> ExecutionReport
     {
-        const auto found = functions.find(id);
-        if (found == functions.end() || found->second->kind != semantic::FunctionKind::user)
-            return std::nullopt;
-        const auto &function = *found->second;
-        if (arguments.size() != function.signature.parameterTypes.size())
-            return std::nullopt;
-        for (std::size_t index = 0; index < arguments.size(); ++index)
-            if (!valueMatches(arguments[index], function.signature.parameterTypes[index]))
-                return std::nullopt;
-        Frame frame{.function = &function,
+        return {.result = fail(std::move(code), std::move(message)),
+                .hotEvents = std::move(hotEvents)};
+    };
+    const auto createVmFrame = [](const RuntimeFunction *function,
+                                  const std::vector<bytecode::Value> &callArguments,
+                                  std::size_t stackBase) -> Frame
+    {
+        Frame frame{.function = function,
                     .pc = 0,
                     .stackBase = stackBase,
-                    .locals = std::vector<bytecode::Value>(function.localCount)};
-        for (std::size_t index = 0; index < arguments.size(); ++index)
-            frame.locals[index] = arguments[index];
+                    .locals = std::vector<bytecode::Value>(function->bytecode().localCount)};
+        for (std::size_t index = 0; index < callArguments.size(); ++index)
+            frame.locals[index] = callArguments[index];
         return frame;
     };
 
-    const auto initialFrame = createFrame(entry, arguments, 0);
-    if (!initialFrame)
-        return fail("R5002", "invalid entry function or arguments");
+    const auto initialDispatch = dispatcher.dispatch(entry, arguments);
+    if (!initialDispatch)
+        return failExecution("R5002", "invalid entry function or arguments");
+    if (initialDispatch->tier != ExecutionTier::virtualMachine)
+        return failExecution("R5008", "native execution is unavailable");
 
     std::vector<Frame> frames;
-    frames.push_back(*initialFrame);
+    frames.push_back(createVmFrame(initialDispatch->function, arguments, 0));
     std::vector<bytecode::Value> stack;
     const auto popValue = [&stack]() -> bytecode::Value
     {
@@ -103,9 +100,9 @@ ExecutionResult VirtualMachine::execute(semantic::FunctionId entry,
     while (!frames.empty())
     {
         auto &frame = frames.back();
-        const auto &function = *frame.function;
+        const auto &function = frame.function->bytecode();
         if (frame.pc >= function.code.size())
-            return fail("R5005", "function fell through");
+            return failExecution("R5005", "function fell through");
 
         const auto &instruction = function.code[frame.pc];
         using enum bytecode::Opcode;
@@ -153,7 +150,7 @@ ExecutionResult VirtualMachine::execute(semantic::FunctionId entry,
             const auto right = std::get<std::int64_t>(popValue());
             const auto left = std::get<std::int64_t>(popValue());
             if (right == 0 || (left == std::numeric_limits<std::int64_t>::min() && right == -1))
-                return fail("R5004", "invalid i64 division");
+                return failExecution("R5004", "invalid i64 division");
             stack.push_back(instruction.opcode == divI64 ? left / right : left % right);
             ++frame.pc;
             break;
@@ -228,27 +225,32 @@ ExecutionResult VirtualMachine::execute(semantic::FunctionId entry,
             break;
         case call:
         {
-            const auto &callee = *functions.at(instruction.operand);
-            std::vector<bytecode::Value> callArguments(callee.signature.parameterTypes.size());
+            const auto *callee = functions_.find(instruction.operand);
+            if (callee == nullptr)
+                return failExecution("R5003", "unsupported function");
+            const auto &calleeBytecode = callee->bytecode();
+            std::vector<bytecode::Value> callArguments(calleeBytecode.signature.parameterTypes.size());
             for (std::size_t index = callArguments.size(); index > 0; --index)
                 callArguments[index - 1] = popValue();
 
             // Advance the caller before pushing the callee so execution resumes
             // at the instruction following the call after the callee returns.
             ++frame.pc;
-            if (callee.kind == semantic::FunctionKind::user)
+            if (calleeBytecode.kind == semantic::FunctionKind::user)
             {
                 if (frames.size() >= maximumFrameCount)
-                    return fail("R5006", "VM frame limit exceeded");
-                const auto calleeFrame = createFrame(callee.id, callArguments, stack.size());
-                if (!calleeFrame)
-                    return fail("R5002", "invalid call arguments");
-                frames.push_back(*calleeFrame);
+                    return failExecution("R5006", "VM frame limit exceeded");
+                const auto calleeDispatch = dispatcher.dispatch(callee->id(), callArguments);
+                if (!calleeDispatch)
+                    return failExecution("R5002", "invalid call arguments");
+                if (calleeDispatch->tier != ExecutionTier::virtualMachine)
+                    return failExecution("R5008", "native execution is unavailable");
+                frames.push_back(createVmFrame(calleeDispatch->function, callArguments, stack.size()));
                 break;
             }
-            const auto *builtin = bytecode::findBuiltin(callee.id);
+            const auto *builtin = bytecode::findBuiltin(callee->id());
             if (builtin == nullptr)
-                return fail("R5003", "unsupported host function");
+                return failExecution("R5003", "unsupported host function");
             switch (builtin->kind)
             {
             case bytecode::BuiltinKind::printI64:
@@ -271,22 +273,23 @@ ExecutionResult VirtualMachine::execute(semantic::FunctionId entry,
             auto value = popValue();
             // A returning frame must leave no operands above its caller-owned stack segment.
             if (stack.size() != frame.stackBase)
-                return fail("R5007", "invalid frame stack state");
+                return failExecution("R5007", "invalid frame stack state");
             frames.pop_back();
             if (frames.empty())
-                return {.value = std::move(value), .error = std::nullopt};
+                return {.result = {.value = std::move(value), .error = std::nullopt},
+                        .hotEvents = std::move(hotEvents)};
             stack.push_back(std::move(value));
             break;
         }
         case returnVoid:
             if (stack.size() != frame.stackBase)
-                return fail("R5007", "invalid frame stack state");
+                return failExecution("R5007", "invalid frame stack state");
             frames.pop_back();
             if (frames.empty())
-                return {};
+                return {.result = {}, .hotEvents = std::move(hotEvents)};
             break;
         }
     }
-    return fail("R5005", "VM frame stack became empty without return");
+    return failExecution("R5005", "VM frame stack became empty without return");
 }
 } // namespace ember::runtime
