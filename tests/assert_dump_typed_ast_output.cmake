@@ -10,9 +10,15 @@ if(NOT "${result}" STREQUAL "0")
 endif()
 
 if(NOT "${standard_error}" STREQUAL "")
-    message(FATAL_ERROR "dump-typed-ast wrote diagnostics: '${standard_error}'.")
+    message(FATAL_ERROR
+        "dump-typed-ast wrote diagnostics: '${standard_error}'."
+    )
 endif()
 
-if(NOT standard_output MATCHES "TypedProgram" OR NOT standard_output MATCHES "Binary \\+: i64")
-    message(FATAL_ERROR "Typed AST dump does not contain typed binary expression: '${standard_output}'.")
+if(NOT standard_output MATCHES "TypedProgram" OR
+   NOT standard_output MATCHES "Binary \\+: i64")
+    message(FATAL_ERROR
+        "Typed AST dump does not contain typed binary expression: "
+        "'${standard_output}'."
+    )
 endif()

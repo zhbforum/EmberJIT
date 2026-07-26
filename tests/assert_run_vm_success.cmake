@@ -6,7 +6,9 @@ execute_process(
 )
 
 if(NOT "${result}" STREQUAL "0")
-    message(FATAL_ERROR "Expected exit code 0, got '${result}': '${standard_error}'.")
+    message(FATAL_ERROR
+        "Expected exit code 0, got '${result}': '${standard_error}'."
+    )
 endif()
 
 if(NOT "${standard_output}" STREQUAL "")
