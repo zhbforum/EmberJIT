@@ -386,7 +386,17 @@ VerifyResult Verifier::verify(Program program) const
                 return true;
             };
             const auto binary = [&](semantic::Type input, semantic::Type output)
-            { return pop(input) && pop(input) && (state.stack.push_back(output), true); };
+            {
+                if (state.stack.size() < 2 || state.stack.back() != input ||
+                    state.stack[state.stack.size() - 2] != input)
+                {
+                    instructionError(function, pc, "stack type mismatch");
+                    return false;
+                }
+                state.stack.pop_back();
+                state.stack.back() = output;
+                return true;
+            };
             bool valid = true;
             std::vector<std::size_t> successors;
             switch (instruction.opcode)
