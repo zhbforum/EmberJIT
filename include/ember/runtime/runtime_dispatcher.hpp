@@ -23,6 +23,9 @@ struct RuntimeOptions
     bool jitEnabled{true};
     // Benchmark-only baseline; the CLI always leaves profiling enabled.
     bool profilingEnabled{true};
+    // Test-only fault injection. It proves failed compilation leaves the VM
+    // entry point intact; no command-line option exposes this behavior.
+    bool forceNativeCompilationFailureForTesting{};
 };
 
 struct DispatchDecision

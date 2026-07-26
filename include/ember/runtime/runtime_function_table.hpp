@@ -15,7 +15,7 @@ class RuntimeDispatcher;
 class RuntimeFunctionTable
 {
   public:
-    explicit RuntimeFunctionTable(bytecode::VerifiedProgram verifiedProgram);
+    RuntimeFunctionTable(bytecode::VerifiedProgram verifiedProgram, bool retainNativeSource);
 
     [[nodiscard]] const RuntimeFunction *find(semantic::FunctionId id) const noexcept;
 

@@ -2,16 +2,29 @@
 
 #include <cassert>
 #include <exception>
+#include <memory>
 #include <utility>
 
 namespace ember::runtime
 {
-RuntimeFunctionTable::RuntimeFunctionTable(bytecode::VerifiedProgram verifiedProgram)
+RuntimeFunctionTable::RuntimeFunctionTable(bytecode::VerifiedProgram verifiedProgram,
+                                           bool retainNativeSource)
 {
-    auto program = std::move(verifiedProgram).takeProgram();
-    functions_.reserve(program.functions.size());
-    for (auto &function : program.functions)
-        functions_.emplace_back(std::move(function));
+    if (retainNativeSource)
+    {
+        auto nativeSource = std::make_shared<const bytecode::VerifiedProgram>(std::move(verifiedProgram));
+        const auto &program = nativeSource->program();
+        functions_.reserve(program.functions.size());
+        for (const auto &function : program.functions)
+            functions_.emplace_back(function, nativeSource);
+    }
+    else
+    {
+        auto program = std::move(verifiedProgram).takeProgram();
+        functions_.reserve(program.functions.size());
+        for (auto &function : program.functions)
+            functions_.emplace_back(std::move(function), nullptr);
+    }
 
     index_.reserve(functions_.size());
     for (std::size_t index = 0; index < functions_.size(); ++index)

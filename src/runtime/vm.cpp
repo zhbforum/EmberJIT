@@ -6,6 +6,7 @@
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <utility>
 
 namespace ember::runtime
@@ -13,6 +14,7 @@ namespace ember::runtime
 namespace
 {
 constexpr std::size_t maximumFrameCount = 4096;
+constexpr std::size_t maximumNativeBridgeDepth = 64;
 
 struct Frame
 {
@@ -20,6 +22,7 @@ struct Frame
     std::size_t pc{};
     // Values below this boundary belong to suspended caller expressions.
     std::size_t stackBase{};
+    bool ownsDynamicFrame{};
     std::vector<bytecode::Value> locals;
 };
 
@@ -46,7 +49,7 @@ struct Frame
 } // namespace
 
 VirtualMachine::VirtualMachine(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options)
-    : options_(std::move(options)), functions_(std::move(verifiedProgram)) {}
+    : options_(std::move(options)), functions_(std::move(verifiedProgram), options_.jitEnabled) {}
 
 VirtualMachine VirtualMachine::create(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options)
 {
@@ -62,11 +65,29 @@ ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
                                         const std::vector<bytecode::Value> &arguments)
 {
     std::vector<HotFunctionEvent> hotEvents;
-    RuntimeDispatcher dispatcher{functions_, options_, hotEvents};
-    const auto failExecution = [&hotEvents](std::string code, std::string message) -> ExecutionReport
+    NativeCallState state{.machine = this, .events = &hotEvents, .dynamicFrameCount = 0,
+                          .nativeBridgeDepth = 0};
+    auto result = executeInternal(entry, arguments, state);
+    return {.result = std::move(result), .hotEvents = std::move(hotEvents)};
+}
+
+ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
+                                                const std::vector<bytecode::Value> &arguments,
+                                                NativeCallState &state, bool forceVm)
+{
+    if (state.dynamicFrameCount >= maximumFrameCount)
+        return fail("R5006", "VM frame limit exceeded");
+    ++state.dynamicFrameCount;
+    struct DynamicFrameGuard
     {
-        return {.result = fail(std::move(code), std::move(message)),
-                .hotEvents = std::move(hotEvents)};
+        NativeCallState &state;
+        ~DynamicFrameGuard() { --state.dynamicFrameCount; }
+    } dynamicFrameGuard{state};
+
+    RuntimeDispatcher dispatcher{functions_, options_, *state.events};
+    const auto failExecution = [](std::string code, std::string message) -> ExecutionResult
+    {
+        return fail(std::move(code), std::move(message));
     };
     const auto createVmFrame = [](const RuntimeFunction *function,
                                   const std::vector<bytecode::Value> &callArguments,
@@ -75,17 +96,45 @@ ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
         Frame frame{.function = function,
                     .pc = 0,
                     .stackBase = stackBase,
+                    .ownsDynamicFrame = false,
                     .locals = std::vector<bytecode::Value>(function->bytecode().localCount)};
         for (std::size_t index = 0; index < callArguments.size(); ++index)
             frame.locals[index] = callArguments[index];
         return frame;
     };
+    const auto invokeNative = [&state](const RuntimeFunction *function,
+                                       std::span<const bytecode::Value> callArguments)
+        -> std::optional<NativeInvocation>
+    {
+        const auto &bytecode = function->bytecode();
+        std::vector<std::int64_t> locals(bytecode.localCount);
+        for (std::size_t index = 0; index < callArguments.size(); ++index)
+        {
+            if (!std::holds_alternative<std::int64_t>(callArguments[index]))
+                return std::nullopt;
+            locals[index] = std::get<std::int64_t>(callArguments[index]);
+        }
+        return function->invokeNativeI64Frame(locals, &state, &VirtualMachine::nativeCallBridge);
+    };
 
     const auto initialDispatch = dispatcher.dispatch(entry, arguments);
     if (!initialDispatch)
         return failExecution("R5002", "invalid entry function or arguments");
-    if (initialDispatch->tier != ExecutionTier::virtualMachine)
-        return failExecution("R5008", "native execution is unavailable");
+    if (!forceVm && initialDispatch->tier == ExecutionTier::native)
+    {
+        const auto result = invokeNative(initialDispatch->function, arguments);
+        if (!result)
+            return failExecution("R5002", "invalid native entry arguments");
+        if (result->error == NativeFrameError::invalidI64Division)
+            return failExecution("R5004", "invalid i64 division");
+        if (result->error == NativeFrameError::frameLimitExceeded)
+            return failExecution("R5006", "VM frame limit exceeded");
+        if (result->error == NativeFrameError::invalidCall)
+            return failExecution("R5003", "native call bridge failed");
+        if (result->error != NativeFrameError::none)
+            return failExecution("R5005", "invalid native execution status");
+        return {.value = result->value, .error = std::nullopt};
+    }
 
     std::vector<Frame> frames;
     frames.push_back(createVmFrame(initialDispatch->function, arguments, 0));
@@ -238,14 +287,37 @@ ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
             ++frame.pc;
             if (calleeBytecode.kind == semantic::FunctionKind::user)
             {
-                if (frames.size() >= maximumFrameCount)
+                if (state.dynamicFrameCount >= maximumFrameCount)
                     return failExecution("R5006", "VM frame limit exceeded");
                 const auto calleeDispatch = dispatcher.dispatch(callee->id(), callArguments);
                 if (!calleeDispatch)
                     return failExecution("R5002", "invalid call arguments");
-                if (calleeDispatch->tier != ExecutionTier::virtualMachine)
-                    return failExecution("R5008", "native execution is unavailable");
-                frames.push_back(createVmFrame(calleeDispatch->function, callArguments, stack.size()));
+                if (!forceVm && calleeDispatch->tier == ExecutionTier::native)
+                {
+                    // Unlike a bridge re-entry, this VM-to-native transition
+                    // does not call executeInternal. Reserve its Ember frame
+                    // explicitly so every dynamic user invocation consumes
+                    // exactly one shared-budget slot.
+                    ++state.dynamicFrameCount;
+                    DynamicFrameGuard nativeFrameGuard{state};
+                    const auto result = invokeNative(calleeDispatch->function, callArguments);
+                    if (!result)
+                        return failExecution("R5002", "invalid native call arguments");
+                    if (result->error == NativeFrameError::invalidI64Division)
+                        return failExecution("R5004", "invalid i64 division");
+                    if (result->error == NativeFrameError::frameLimitExceeded)
+                        return failExecution("R5006", "VM frame limit exceeded");
+                    if (result->error == NativeFrameError::invalidCall)
+                        return failExecution("R5003", "native call bridge failed");
+                    if (result->error != NativeFrameError::none)
+                        return failExecution("R5005", "invalid native execution status");
+                    stack.push_back(result->value);
+                    break;
+                }
+                ++state.dynamicFrameCount;
+                auto calleeFrame = createVmFrame(calleeDispatch->function, callArguments, stack.size());
+                calleeFrame.ownsDynamicFrame = true;
+                frames.push_back(std::move(calleeFrame));
                 break;
             }
             const auto *builtin = bytecode::findBuiltin(callee->id());
@@ -274,22 +346,94 @@ ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
             // A returning frame must leave no operands above its caller-owned stack segment.
             if (stack.size() != frame.stackBase)
                 return failExecution("R5007", "invalid frame stack state");
+            const bool ownsDynamicFrame = frame.ownsDynamicFrame;
             frames.pop_back();
+            if (ownsDynamicFrame)
+                --state.dynamicFrameCount;
             if (frames.empty())
-                return {.result = {.value = std::move(value), .error = std::nullopt},
-                        .hotEvents = std::move(hotEvents)};
+                return {.value = std::move(value), .error = std::nullopt};
             stack.push_back(std::move(value));
             break;
         }
         case returnVoid:
             if (stack.size() != frame.stackBase)
                 return failExecution("R5007", "invalid frame stack state");
+            const bool ownsDynamicFrame = frame.ownsDynamicFrame;
             frames.pop_back();
+            if (ownsDynamicFrame)
+                --state.dynamicFrameCount;
             if (frames.empty())
-                return {.result = {}, .hotEvents = std::move(hotEvents)};
+                return {};
             break;
         }
     }
     return failExecution("R5005", "VM frame stack became empty without return");
+}
+
+std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame *caller, std::uint64_t callee,
+                                               const std::int64_t *arguments,
+                                               std::uint64_t argumentCount,
+                                               std::int64_t *result) noexcept
+{
+    const auto failBridge = [caller](NativeFrameError error) -> std::uint64_t
+    {
+        if (caller != nullptr)
+            caller->errorCode = static_cast<std::uint64_t>(error);
+        return static_cast<std::uint64_t>(error);
+    };
+    if (caller == nullptr || caller->callContext == nullptr || result == nullptr ||
+        callee > std::numeric_limits<semantic::FunctionId>::max() ||
+        argumentCount > std::numeric_limits<std::size_t>::max() ||
+        (argumentCount != 0 && arguments == nullptr))
+        return failBridge(NativeFrameError::invalidCall);
+
+    auto *state = static_cast<NativeCallState *>(caller->callContext);
+    if (state->machine == nullptr || state->events == nullptr)
+        return failBridge(NativeFrameError::invalidCall);
+    bool depthIncremented{};
+    try
+    {
+        std::vector<bytecode::Value> callArguments;
+        callArguments.reserve(static_cast<std::size_t>(argumentCount));
+        for (std::size_t index{}; index < static_cast<std::size_t>(argumentCount); ++index)
+            callArguments.emplace_back(arguments[index]);
+
+        const bool forceVm = state->nativeBridgeDepth >= maximumNativeBridgeDepth;
+        if (!forceVm)
+        {
+            ++state->nativeBridgeDepth;
+            depthIncremented = true;
+        }
+        const auto invocation = state->machine->executeInternal(
+            static_cast<semantic::FunctionId>(callee), callArguments, *state, forceVm);
+        if (depthIncremented)
+        {
+            --state->nativeBridgeDepth;
+            depthIncremented = false;
+        }
+        if (invocation.error)
+        {
+            const auto error = invocation.error->code == "R5004"     ? NativeFrameError::invalidI64Division
+                               : invocation.error->code == "R5006" ? NativeFrameError::frameLimitExceeded
+                                                                       : NativeFrameError::invalidCall;
+            return failBridge(error);
+        }
+        if (!invocation.value || !std::holds_alternative<std::int64_t>(*invocation.value))
+            return failBridge(NativeFrameError::invalidCall);
+        *result = std::get<std::int64_t>(*invocation.value);
+        return static_cast<std::uint64_t>(NativeFrameError::none);
+    }
+    catch (const std::bad_alloc &)
+    {
+        if (depthIncremented)
+            --state->nativeBridgeDepth;
+        return failBridge(NativeFrameError::invalidCall);
+    }
+    catch (...)
+    {
+        if (depthIncremented)
+            --state->nativeBridgeDepth;
+        return failBridge(NativeFrameError::invalidCall);
+    }
 }
 } // namespace ember::runtime

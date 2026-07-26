@@ -72,10 +72,11 @@ target_link_libraries(ember_ir PUBLIC ember_bytecode)
 ember_configure_compile_options(ember_ir)
 
 add_library(ember_jit
+    src/jit/baseline_compiler.cpp
     src/jit/code_buffer.cpp
     src/jit/emitter.cpp
 )
-target_link_libraries(ember_jit PUBLIC ember_support)
+target_link_libraries(ember_jit PUBLIC ember_support ember_ir)
 ember_configure_compile_options(ember_jit)
 
 add_library(ember_runtime
@@ -85,7 +86,7 @@ add_library(ember_runtime
     src/runtime/native_code.cpp
     src/runtime/vm.cpp
 )
-target_link_libraries(ember_runtime PUBLIC ember_bytecode ember_jit)
+target_link_libraries(ember_runtime PUBLIC ember_bytecode ember_ir ember_jit)
 ember_configure_compile_options(ember_runtime)
 
 add_executable(ember
@@ -201,6 +202,7 @@ if(BUILD_TESTING)
         tests/semantic/analyzer_tests.cpp
         tests/bytecode/bytecode_tests.cpp
         tests/ir/ir_tests.cpp
+        tests/jit/baseline_compiler_tests.cpp
         tests/jit/emitter_tests.cpp
         tests/runtime/runtime_tests.cpp
     )
@@ -275,6 +277,14 @@ if(BUILD_TESTING)
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_dump_ir_fixture}
             -P ${ember_test_script_directory}/assert_dump_ir_output.cmake
+    )
+
+    add_test(
+        NAME ember_dump_asm
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_dump_ir_fixture}
+            -P ${ember_test_script_directory}/assert_dump_asm_output.cmake
     )
 
     add_test(
