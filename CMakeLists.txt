@@ -71,13 +71,21 @@ add_library(ember_ir
 target_link_libraries(ember_ir PUBLIC ember_bytecode)
 ember_configure_compile_options(ember_ir)
 
+add_library(ember_jit
+    src/jit/code_buffer.cpp
+    src/jit/emitter.cpp
+)
+target_link_libraries(ember_jit PUBLIC ember_support)
+ember_configure_compile_options(ember_jit)
+
 add_library(ember_runtime
     src/runtime/runtime_dispatcher.cpp
     src/runtime/runtime_function.cpp
     src/runtime/runtime_function_table.cpp
+    src/runtime/native_code.cpp
     src/runtime/vm.cpp
 )
-target_link_libraries(ember_runtime PUBLIC ember_bytecode)
+target_link_libraries(ember_runtime PUBLIC ember_bytecode ember_jit)
 ember_configure_compile_options(ember_runtime)
 
 add_executable(ember
@@ -193,6 +201,7 @@ if(BUILD_TESTING)
         tests/semantic/analyzer_tests.cpp
         tests/bytecode/bytecode_tests.cpp
         tests/ir/ir_tests.cpp
+        tests/jit/emitter_tests.cpp
         tests/runtime/runtime_tests.cpp
     )
 
