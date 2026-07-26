@@ -14,6 +14,15 @@ NativeCodeHandle::publishI64Binary(jit::x64::MachineCode machineCode) noexcept
     return {.handle = NativeCodeHandle{std::move(*code.buffer)}, .error = jit::CodeBufferError::none};
 }
 
+NativeCodeCreateResult
+NativeCodeHandle::publishI64Frame(jit::x64::MachineCode machineCode) noexcept
+{
+    auto code = jit::CodeBuffer::create(machineCode.bytes());
+    if (!code.buffer)
+        return {.handle = std::nullopt, .error = code.error};
+    return {.handle = NativeCodeHandle{std::move(*code.buffer)}, .error = jit::CodeBufferError::none};
+}
+
 std::int64_t NativeCodeHandle::invokeI64Binary(std::int64_t left, std::int64_t right) const
 {
     assert(valid());
@@ -23,5 +32,14 @@ std::int64_t NativeCodeHandle::invokeI64Binary(std::int64_t left, std::int64_t r
     using EntryPoint = std::int64_t (*)(std::int64_t, std::int64_t);
     const auto function = reinterpret_cast<EntryPoint>(entryAddress());
     return function(left, right);
+}
+
+std::int64_t NativeCodeHandle::invokeI64Frame(NativeFrame &frame) const
+{
+    assert(valid());
+    assert(frame.localCount == 0 || frame.locals != nullptr);
+    using EntryPoint = std::int64_t (*)(NativeFrame *);
+    const auto function = reinterpret_cast<EntryPoint>(entryAddress());
+    return function(&frame);
 }
 } // namespace ember::runtime

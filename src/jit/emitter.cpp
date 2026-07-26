@@ -182,6 +182,118 @@ bool Emitter::test(Register left, Register right)
     return true;
 }
 
+bool Emitter::set(Condition condition, Register destination)
+{
+    if (!beginInstruction(4))
+        return false;
+    const auto code = registerCode(destination);
+    if (code >= 8)
+        appendByte(0x41);
+    else if ((code & 0x7U) >= 4)
+        appendByte(0x40);
+    appendByte(0x0F);
+    appendByte(static_cast<std::uint8_t>(0x90U + static_cast<std::uint8_t>(condition)));
+    appendByte(static_cast<std::uint8_t>(0xC0U | (code & 0x7U)));
+    return true;
+}
+
+bool Emitter::push(Register value)
+{
+    if (!beginInstruction(2))
+        return false;
+    if (registerCode(value) >= 8)
+        appendByte(0x41);
+    appendByte(static_cast<std::uint8_t>(0x50U + (registerCode(value) & 0x7U)));
+    return true;
+}
+
+bool Emitter::pop(Register value)
+{
+    if (!beginInstruction(2))
+        return false;
+    if (registerCode(value) >= 8)
+        appendByte(0x41);
+    appendByte(static_cast<std::uint8_t>(0x58U + (registerCode(value) & 0x7U)));
+    return true;
+}
+
+bool Emitter::subtractStackPointer(std::uint32_t bytes)
+{
+    if (!beginInstruction(7))
+        return false;
+    appendByte(0x48);
+    appendByte(0x81);
+    appendByte(0xEC);
+    appendUInt32(bytes);
+    return true;
+}
+
+bool Emitter::addStackPointer(std::uint32_t bytes)
+{
+    if (!beginInstruction(7))
+        return false;
+    appendByte(0x48);
+    appendByte(0x81);
+    appendByte(0xC4);
+    appendUInt32(bytes);
+    return true;
+}
+
+bool Emitter::load(Register destination, Register base, std::int32_t displacement)
+{
+    if (!beginInstruction(8))
+        return false;
+    appendRexW(destination, base);
+    appendByte(0x8B);
+    const auto reg = registerCode(destination);
+    const auto rm = registerCode(base);
+    appendByte(static_cast<std::uint8_t>(0x80U | ((reg & 0x7U) << 3U) | (rm & 0x7U)));
+    if ((rm & 0x7U) == 4)
+        appendByte(0x24);
+    appendUInt32(static_cast<std::uint32_t>(displacement));
+    return true;
+}
+
+bool Emitter::loadEffectiveAddress(Register destination, Register base, std::int32_t displacement)
+{
+    if (!beginInstruction(8))
+        return false;
+    appendRexW(destination, base);
+    appendByte(0x8D);
+    const auto reg = registerCode(destination);
+    const auto rm = registerCode(base);
+    appendByte(static_cast<std::uint8_t>(0x80U | ((reg & 0x7U) << 3U) | (rm & 0x7U)));
+    if ((rm & 0x7U) == 4)
+        appendByte(0x24);
+    appendUInt32(static_cast<std::uint32_t>(displacement));
+    return true;
+}
+
+bool Emitter::store(Register base, std::int32_t displacement, Register source)
+{
+    if (!beginInstruction(8))
+        return false;
+    appendRexW(source, base);
+    appendByte(0x89);
+    const auto reg = registerCode(source);
+    const auto rm = registerCode(base);
+    appendByte(static_cast<std::uint8_t>(0x80U | ((reg & 0x7U) << 3U) | (rm & 0x7U)));
+    if ((rm & 0x7U) == 4)
+        appendByte(0x24);
+    appendUInt32(static_cast<std::uint32_t>(displacement));
+    return true;
+}
+
+bool Emitter::call(Register target)
+{
+    if (!beginInstruction(3))
+        return false;
+    appendRexW(Register::rax, target);
+    appendByte(0xFF);
+    appendModRm(2, target);
+    return true;
+}
+
 bool Emitter::signExtendRaxIntoRdx()
 {
     if (!beginInstruction(2))

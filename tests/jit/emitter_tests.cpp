@@ -11,6 +11,7 @@
 #include <optional>
 #include <ranges>
 #include <utility>
+#include <vector>
 
 #if EMBER_HAS_WIN64_JIT
 #include <windows.h>
@@ -143,6 +144,24 @@ EMBER_TEST("x64 emitter encodes the remaining integer leaf subset")
     }
 }
 
+EMBER_TEST("x64 emitter uses a REX prefix for every low-byte setcc register")
+{
+    ember::jit::x64::Emitter emitter;
+    tests.expect(emitter.set(ember::jit::x64::Condition::equal, ember::jit::x64::Register::rsp) &&
+                     emitter.set(ember::jit::x64::Condition::notEqual, ember::jit::x64::Register::r8) &&
+                     emitter.returnFromFunction(),
+                 "setcc accepts SPL and R8B destinations");
+    const auto emitted = emitter.finalize();
+    constexpr std::array expected{std::byte{0x40}, std::byte{0x0F}, std::byte{0x94},
+                                  std::byte{0xC4}, std::byte{0x41}, std::byte{0x0F},
+                                  std::byte{0x95}, std::byte{0xC0}, std::byte{0xC3}};
+    tests.expect(emitted.code.has_value() && emitted.error == ember::jit::x64::EmitError::none,
+                 "setcc low-byte encodings finalize");
+    if (emitted.code)
+        tests.expect(isEqual(emitted.code->bytes(), expected),
+                     "SPL uses neutral REX and R8B uses extended REX");
+}
+
 EMBER_TEST("x64 emitter rejects unbound labels")
 {
     ember::jit::x64::Emitter emitter;
@@ -242,6 +261,35 @@ EMBER_TEST("native code handle rejects an empty publication")
                  "empty byte sequence cannot become executable memory");
 }
 
+EMBER_TEST("x64 emitter encodes stack-frame memory and indirect-call primitives")
+{
+    ember::jit::x64::Emitter emitter;
+    tests.expect(emitter.push(ember::jit::x64::Register::rbx) &&
+                     emitter.subtractStackPointer(32) &&
+                     emitter.load(ember::jit::x64::Register::rax,
+                                  ember::jit::x64::Register::rsp, 16) &&
+                     emitter.loadEffectiveAddress(ember::jit::x64::Register::r8,
+                                                  ember::jit::x64::Register::rsp, 40) &&
+                     emitter.store(ember::jit::x64::Register::rsp, 24,
+                                   ember::jit::x64::Register::rax) &&
+                     emitter.addStackPointer(32) && emitter.pop(ember::jit::x64::Register::rbx) &&
+                     emitter.returnFromFunction(),
+                 "frame and memory primitives encode");
+    const auto emitted = emitter.finalize();
+    tests.expect(emitted.code.has_value() && emitted.error == ember::jit::x64::EmitError::none,
+                 "frame primitive encoding finalizes");
+    if (emitted.code)
+    {
+        constexpr std::array expectedLea{std::byte{0x4C}, std::byte{0x8D}, std::byte{0x84},
+                                         std::byte{0x24}, std::byte{0x28}, std::byte{0x00},
+                                         std::byte{0x00}, std::byte{0x00}};
+        const auto bytes = emitted.code->bytes();
+        tests.expect(bytes.size() >= expectedLea.size() + 16 &&
+                         isEqual(bytes.subspan(16, expectedLea.size()), expectedLea),
+                     "LEA uses the checked RSP SIB encoding needed for call arguments");
+    }
+}
+
 #if EMBER_HAS_WIN64_JIT
 EMBER_TEST("native code handle executes Win64 i64 arithmetic from RX memory")
 {
@@ -307,6 +355,27 @@ EMBER_TEST("native code handle executes both generated branch paths")
                  "generated branch takes the fall-through path");
     tests.expect(native.handle->invokeI64Binary(5, 5) == 5,
                  "generated branch handles equality");
+}
+
+EMBER_TEST("native frame adapter executes generated local-slot access")
+{
+    ember::jit::x64::Emitter emitter;
+    tests.expect(emitter.load(ember::jit::x64::Register::rax, ember::jit::x64::Register::rcx, 0) &&
+                     emitter.load(ember::jit::x64::Register::rax, ember::jit::x64::Register::rax, 0) &&
+                     emitter.returnFromFunction(),
+                 "native frame local access encodes");
+    auto emitted = emitter.finalize();
+    tests.expect(emitted.code.has_value(), "native frame access finalizes");
+    if (!emitted.code)
+        return;
+    auto native = ember::runtime::NativeCodeHandle::publishI64Frame(std::move(*emitted.code));
+    tests.expect(native.handle.has_value(), "native frame code is published");
+    if (!native.handle)
+        return;
+    std::vector<std::int64_t> locals{73};
+    ember::runtime::NativeFrame frame{.locals = locals.data(), .localCount = locals.size()};
+    tests.expect(native.handle->invokeI64Frame(frame) == 73,
+                 "native frame adapter returns the requested local slot");
 }
 #else
 EMBER_TEST("native code publication reports unsupported target")
