@@ -308,7 +308,6 @@ EMBER_TEST("hot binary i64 callee publishes atomically and matches the VM")
         std::move(*vmProgram), {.hotThreshold = 1, .jitEnabled = false, .profilingEnabled = true});
     const auto jitReport = jitVm.execute(0);
     const auto vmReport = vm.execute(0);
-    const auto *entry = jitVm.function(0);
     const auto *callee = jitVm.function(1);
     const auto *vmCallee = vm.function(1);
 
@@ -322,12 +321,14 @@ EMBER_TEST("hot binary i64 callee publishes atomically and matches the VM")
                      vmCallee->tier() == ember::runtime::ExecutionTier::virtualMachine,
                  "disabled JIT preserves profiling but prohibits publication and native dispatch");
 #if EMBER_HAS_WIN64_JIT
+    const auto *entry = jitVm.function(0);
     tests.expect(callee != nullptr && callee->tier() == ember::runtime::ExecutionTier::native,
                  "successful Win64 publication selects the native tier on the threshold call");
     tests.expect(entry != nullptr && entry->tier() == ember::runtime::ExecutionTier::native,
                  "a native caller crosses the trusted bridge to its native callee");
 #else
-    tests.expect(callee != nullptr && callee->tier() == ember::runtime::ExecutionTier::virtualMachine,
+    tests.expect(callee != nullptr &&
+                     callee->tier() == ember::runtime::ExecutionTier::virtualMachine,
                  "unsupported native platforms retain VM execution");
 #endif
 }
@@ -391,58 +392,49 @@ EMBER_TEST("hot i64 loop with locals and comparisons matches the VM")
         std::move(*vmProgram), {.hotThreshold = 1, .jitEnabled = false, .profilingEnabled = true});
     const auto jitReport = jitVm.execute(0);
     const auto vmReport = vm.execute(0);
-    const auto *loop = jitVm.function(1);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
                      jitReport.result.value == ember::bytecode::Value{std::int64_t{97}},
                  "native locals, comparisons and loop branches preserve VM semantics");
 #if EMBER_HAS_WIN64_JIT
+    const auto *loop = jitVm.function(1);
     tests.expect(loop != nullptr && loop->tier() == ember::runtime::ExecutionTier::native,
                  "the hot loop publishes only after complete native compilation");
 #endif
 }
 
-EMBER_TEST("native recursive calls preserve the VM result")
-{
-    const auto makeProgram = []
-    {
-        return Program{.functions = {
-                           {.id = 0,
-                            .kind = FunctionKind::user,
-                            .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
-                            .localCount = 1,
-                            .localTypes = {Type::i64},
-                            .code = {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::constant,
-                                      .operand = 0,
-                                      .value = ember::bytecode::Value{std::int64_t{1}}},
-                                     {.opcode = Opcode::lessEqualI64,
-                                      .operand = 0,
-                                      .value = std::nullopt},
-                                     {.opcode = Opcode::jumpIfFalse,
-                                      .operand = 6,
-                                      .value = std::nullopt},
-                                     {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::returnValue,
-                                      .operand = 0,
-                                      .value = std::nullopt},
-                                     {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::constant,
-                                      .operand = 0,
-                                      .value = ember::bytecode::Value{std::int64_t{1}}},
-                                     {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::constant,
-                                      .operand = 0,
-                                      .value = ember::bytecode::Value{std::int64_t{2}}},
-                                     {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
-                                     {.opcode = Opcode::returnValue,
-                                      .operand = 0,
-                                      .value = std::nullopt}}},
-                       }};
+EMBER_TEST("native recursive calls preserve the VM result") {
+    const auto makeProgram = [] {
+        return Program{
+            .functions = {
+                {.id = 0,
+                 .kind = FunctionKind::user,
+                 .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
+                 .localCount = 1,
+                 .localTypes = {Type::i64},
+                 .code = {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::constant,
+                           .operand = 0,
+                           .value = ember::bytecode::Value{std::int64_t{1}}},
+                          {.opcode = Opcode::lessEqualI64, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::jumpIfFalse, .operand = 6, .value = std::nullopt},
+                          {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::constant,
+                           .operand = 0,
+                           .value = ember::bytecode::Value{std::int64_t{1}}},
+                          {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::constant,
+                           .operand = 0,
+                           .value = ember::bytecode::Value{std::int64_t{2}}},
+                          {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
+                          {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
+            }};
     };
     auto jitProgram = verify(makeProgram());
     auto vmProgram = verify(makeProgram());
@@ -457,21 +449,19 @@ EMBER_TEST("native recursive calls preserve the VM result")
         std::move(*vmProgram), {.hotThreshold = 1, .jitEnabled = false, .profilingEnabled = true});
     const auto jitReport = jitVm.execute(0, {std::int64_t{6}});
     const auto vmReport = vm.execute(0, {std::int64_t{6}});
-    const auto *recursive = jitVm.function(0);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
                      jitReport.result.value == ember::bytecode::Value{std::int64_t{8}},
                  "native recursive bridge calls match the VM result");
 #if EMBER_HAS_WIN64_JIT
+    const auto *recursive = jitVm.function(0);
     tests.expect(recursive != nullptr && recursive->tier() == ember::runtime::ExecutionTier::native,
                  "recursive i64 function remains published in the native tier");
 #endif
 }
 
-EMBER_TEST("shared dynamic frame budget bounds mixed native and VM recursion")
-{
-    const auto makeProgram = []
-    {
+EMBER_TEST("shared dynamic frame budget bounds mixed native and VM recursion") {
+    const auto makeProgram = [] {
         return Program{.functions = {
                            {.id = 0,
                             .kind = FunctionKind::user,
@@ -598,23 +588,22 @@ EMBER_TEST("native caller dispatches an unsupported i64 callee through the VM fa
         std::move(*vmProgram), {.hotThreshold = 1, .jitEnabled = false, .profilingEnabled = true});
     const auto jitReport = jitVm.execute(0);
     const auto vmReport = vm.execute(0);
-    const auto *caller = jitVm.function(0);
-    const auto *callee = jitVm.function(1);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
                      jitReport.result.value == ember::bytecode::Value{std::int64_t{42}},
                  "native caller receives the same result from the VM-only callee");
 #if EMBER_HAS_WIN64_JIT
+    const auto *caller = jitVm.function(0);
+    const auto *callee = jitVm.function(1);
     tests.expect(caller != nullptr && caller->tier() == ember::runtime::ExecutionTier::native &&
-                     callee != nullptr && callee->tier() == ember::runtime::ExecutionTier::virtualMachine,
+                     callee != nullptr &&
+                     callee->tier() == ember::runtime::ExecutionTier::virtualMachine,
                  "bridge preserves mixed native/VM tier selection");
 #endif
 }
 
-EMBER_TEST("zero-argument native bridge calls are accepted")
-{
-    const auto makeProgram = []
-    {
+EMBER_TEST("zero-argument native bridge calls are accepted") {
+    const auto makeProgram = [] {
         return Program{.functions = {
                            {.id = 0,
                             .kind = FunctionKind::user,
