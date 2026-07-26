@@ -209,7 +209,11 @@ EMBER_TEST("IR verifier rejects malformed instruction encodings and definitions"
 {
     const auto nonCanonical = baseI64Function(
         {{.id = 0,
-          .instructions = {{.opcode = Opcode::constantI64, .result = 0, .input = 7, .constant = 1}},
+          .instructions = {{.opcode = Opcode::constantI64,
+                            .result = 0,
+                            .input = 7,
+                            .constant = 1,
+                            .arguments = {}}},
           .terminator = Terminator::returnValue(0)}},
         {Type::i64});
     tests.expect(rejects(nonCanonical), "constant rejects non-canonical unused operands");
@@ -347,10 +351,12 @@ EMBER_TEST("IR lowering fail-closes unsupported forms with precise diagnostics")
         return;
     }
     const auto callLowered = ember::ir::Lowerer{}.lower(*callProgram, 1);
-    tests.expect(!callLowered.function && callLowered.failure == ember::ir::LoweringFailure::unsupported &&
-                     !callLowered.diagnostics.empty() &&
-                     callLowered.diagnostics.front().message.find("pc 1") != std::string::npos,
-                 "i64 call is rejected with its exact bytecode pc");
+    tests.expect(callLowered.function.has_value() && !callLowered.failure &&
+                     callLowered.function->function().blocks.size() == 2 &&
+                     callLowered.function->function().blocks[1].instructions.size() == 2 &&
+                     callLowered.function->function().blocks[1].instructions[1].opcode ==
+                         ember::ir::Opcode::callI64,
+                 "i64 user call lowers to a verifier-checked native bridge instruction");
 
     auto boolProgram = compileAndVerify(
         "fn main() -> i64 { if true { return 1; } else { return 0; } }");

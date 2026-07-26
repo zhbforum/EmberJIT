@@ -15,6 +15,7 @@ using LocalId = std::uint32_t;
 inline constexpr ValueId noValue = std::numeric_limits<ValueId>::max();
 inline constexpr BlockId noBlock = std::numeric_limits<BlockId>::max();
 inline constexpr LocalId noLocal = std::numeric_limits<LocalId>::max();
+inline constexpr semantic::FunctionId noFunction = std::numeric_limits<semantic::FunctionId>::max();
 
 enum class Opcode : std::uint8_t
 {
@@ -34,6 +35,7 @@ enum class Opcode : std::uint8_t
     lessEqualI64,
     greaterI64,
     greaterEqualI64,
+    callI64,
 };
 
 struct Instruction
@@ -45,6 +47,8 @@ struct Instruction
     ValueId right{noValue};
     LocalId local{noLocal};
     std::int64_t constant{};
+    semantic::FunctionId callee{noFunction};
+    std::vector<ValueId> arguments;
 
     [[nodiscard]] static Instruction parameter(ValueId result, LocalId local) noexcept;
     [[nodiscard]] static Instruction constantI64(ValueId result, std::int64_t value) noexcept;
@@ -53,6 +57,8 @@ struct Instruction
     [[nodiscard]] static Instruction negateI64(ValueId result, ValueId input) noexcept;
     [[nodiscard]] static Instruction binaryI64(Opcode opcode, ValueId result, ValueId left,
                                                ValueId right) noexcept;
+    [[nodiscard]] static Instruction callI64(ValueId result, semantic::FunctionId callee,
+                                             std::vector<ValueId> arguments);
 };
 
 enum class TerminatorKind : std::uint8_t

@@ -298,6 +298,31 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
                 stack.push_back(result);
                 continue;
             }
+            if (instruction.opcode == bytecode::Opcode::call)
+            {
+                const auto callee = std::find_if(
+                    functions.begin(), functions.end(), [&instruction](const bytecode::Function &function)
+                    { return function.id == instruction.operand; });
+                if (callee == functions.end() || callee->kind != semantic::FunctionKind::user ||
+                    !isI64SubsetSignature(callee->signature))
+                    return fail(LoweringFailure::unsupported,
+                                atPc(source.id, pc, "call target is outside the native i64 subset"));
+
+                std::vector<ValueId> arguments(callee->signature.parameterTypes.size());
+                for (std::size_t index = arguments.size(); index > 0; --index)
+                {
+                    const auto argument = pop(pc);
+                    if (!argument || function.valueTypes[*argument] != semantic::Type::i64)
+                        return fail(LoweringFailure::internalInvariant,
+                                    atPc(source.id, pc, "verified bytecode has an invalid call argument"));
+                    arguments[index - 1] = *argument;
+                }
+                const auto result = makeValue(semantic::Type::i64);
+                block.instructions.push_back(
+                    Instruction::callI64(result, callee->id, std::move(arguments)));
+                stack.push_back(result);
+                continue;
+            }
             if (instruction.opcode == bytecode::Opcode::jump)
             {
                 if (!blockAt[instruction.operand])
