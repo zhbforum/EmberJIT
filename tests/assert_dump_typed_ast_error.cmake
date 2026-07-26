@@ -14,5 +14,7 @@ if(NOT "${standard_output}" STREQUAL "")
 endif()
 
 if(NOT standard_error MATCHES "error\\[E3006\\]")
-    message(FATAL_ERROR "Expected semantic diagnostic E3006: '${standard_error}'.")
+    message(FATAL_ERROR
+        "Expected semantic diagnostic E3006: '${standard_error}'."
+    )
 endif()

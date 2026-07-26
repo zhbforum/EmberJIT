@@ -1,5 +1,7 @@
 if(NOT DEFINED EXPECTED_OUTPUT_FILE)
-    message(FATAL_ERROR "EXPECTED_OUTPUT_FILE must name a file with expected stdout.")
+    message(FATAL_ERROR
+        "EXPECTED_OUTPUT_FILE must name a file with expected stdout."
+    )
 endif()
 
 execute_process(
@@ -10,7 +12,9 @@ execute_process(
 )
 
 if(NOT "${result}" STREQUAL "0")
-    message(FATAL_ERROR "Expected exit code 0, got '${result}': '${standard_error}'.")
+    message(FATAL_ERROR
+        "Expected exit code 0, got '${result}': '${standard_error}'."
+    )
 endif()
 
 if(NOT "${standard_error}" STREQUAL "")

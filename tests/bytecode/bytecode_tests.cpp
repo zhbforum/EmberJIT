@@ -265,6 +265,87 @@ EMBER_TEST("verifier preserves unary and boolean opcode semantics")
     tests.expect(booleanVerified.program.has_value(), "bool equality verifies as bool opcode");
 }
 
+EMBER_TEST("verifier validates binary operand and result types")
+{
+    using ember::bytecode::Instruction;
+    using ember::bytecode::Opcode;
+    using ember::bytecode::Program;
+    using ember::bytecode::Value;
+    using ember::semantic::FunctionKind;
+    using ember::semantic::Type;
+
+    const auto makeFunction = [](Type returnType,
+                                 std::vector<Instruction> code)
+    {
+        return Program{
+            .functions = {{.id = 0,
+                           .kind = FunctionKind::user,
+                           .signature = {.parameterTypes = {},
+                                         .returnType = returnType},
+                           .localCount = 0,
+                           .localTypes = {},
+                           .code = std::move(code)}}};
+    };
+    const auto verify = [&makeFunction](Type returnType,
+                                        std::vector<Instruction> code)
+    {
+        return ember::bytecode::Verifier{}.verify(
+            makeFunction(returnType, std::move(code)));
+    };
+    const auto constantI64 = [](std::int64_t value)
+    {
+        return Instruction{
+            .opcode = Opcode::constant,
+            .operand = 0,
+            .value = Value{value},
+        };
+    };
+    const auto constantBool = [](bool value)
+    {
+        return Instruction{
+            .opcode = Opcode::constant,
+            .operand = 0,
+            .value = Value{value},
+        };
+    };
+    const auto operation = [](Opcode opcode)
+    {
+        return Instruction{
+            .opcode = opcode,
+            .operand = 0,
+            .value = std::nullopt,
+        };
+    };
+
+    const auto oneOperand = verify(
+        Type::voidType,
+        {constantI64(1), operation(Opcode::addI64),
+         operation(Opcode::returnVoid)});
+    tests.expect(!oneOperand.program.has_value(),
+                 "add.i64 rejects one operand instead of two");
+
+    const auto mismatchedOperands = verify(
+        Type::voidType,
+        {constantBool(true), constantI64(1), operation(Opcode::addI64),
+         operation(Opcode::returnVoid)});
+    tests.expect(!mismatchedOperands.program.has_value(),
+                 "add.i64 rejects a mismatched second operand");
+
+    const auto addition = verify(
+        Type::i64,
+        {constantI64(1), constantI64(2), operation(Opcode::addI64),
+         operation(Opcode::returnValue)});
+    tests.expect(addition.program.has_value(),
+                 "add.i64 produces an i64 result");
+
+    const auto comparison = verify(
+        Type::boolean,
+        {constantI64(1), constantI64(2), operation(Opcode::lessI64),
+         operation(Opcode::returnValue)});
+    tests.expect(comparison.program.has_value(),
+                 "less.i64 produces a bool result");
+}
+
 EMBER_TEST("verifier rejects unsafe local layouts and malformed opcodes")
 {
     const ember::bytecode::Function unsafeLocal{

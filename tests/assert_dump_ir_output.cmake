@@ -20,5 +20,8 @@ if(NOT standard_output MATCHES "fn #[0-9]+ \\(\\) -> i64" OR
    NOT standard_output MATCHES "branch_if_false" OR
    NOT standard_output MATCHES "branch b1" OR
    NOT standard_output MATCHES "return v")
-    message(FATAL_ERROR "IR dump does not show the expected virtual-register function: '${standard_output}'.")
+    message(FATAL_ERROR
+        "IR dump does not show the expected virtual-register function: "
+        "'${standard_output}'."
+    )
 endif()
