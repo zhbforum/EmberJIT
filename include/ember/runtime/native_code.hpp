@@ -2,6 +2,7 @@
 
 #include "ember/jit/code_buffer.hpp"
 #include "ember/jit/emitter.hpp"
+#include "ember/jit/native_abi.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,9 @@ class NativeCodeHandleAccess;
 }
 
 struct NativeCodeCreateResult;
+
+using NativeFrame = jit::NativeFrame;
+using NativeFrameError = jit::NativeFrameError;
 
 // Owns trusted, emitter-produced executable code with the sole native
 // signature supported by this milestone. It is also the only place where an
@@ -34,9 +38,15 @@ class NativeCodeHandle
     // correctness remain the trusted lowering/emitter boundary.
     [[nodiscard]] static NativeCodeCreateResult
     publishI64Binary(jit::x64::MachineCode machineCode) noexcept;
+    // `machineCode` must implement Win64 i64(NativeFrame*). This is the
+    // extensible baseline entry ABI; callers retain ownership of frame locals.
+    [[nodiscard]] static NativeCodeCreateResult
+    publishI64Frame(jit::x64::MachineCode machineCode) noexcept;
     [[nodiscard]] bool valid() const noexcept { return code_.size() != 0; }
     // Requires valid(); debug builds assert this precondition.
     [[nodiscard]] std::int64_t invokeI64Binary(std::int64_t left, std::int64_t right) const;
+    // Requires valid(); debug builds assert this precondition.
+    [[nodiscard]] std::int64_t invokeI64Frame(NativeFrame &frame) const;
     [[nodiscard]] std::size_t codeSize() const noexcept { return code_.size(); }
 
   private:

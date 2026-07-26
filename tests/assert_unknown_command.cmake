@@ -15,7 +15,7 @@ endif()
 
 string(CONCAT dump_usage_pattern
     "usage: .*<dump-tokens\\|dump-ast\\|dump-typed-ast\\|dump-bytecode"
-    "\\|dump-ir> <file>"
+    "\\|dump-ir\\|dump-asm> <file>"
 )
 if(NOT standard_error MATCHES "${dump_usage_pattern}")
     message(FATAL_ERROR "Unexpected usage output: '${standard_error}'.")

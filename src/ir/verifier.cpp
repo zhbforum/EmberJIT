@@ -105,7 +105,8 @@ VerifyResult Verifier::verify(Function function) const
     const auto canonicalNoValues = [](const Instruction &instruction)
     {
         return instruction.input == noValue && instruction.left == noValue &&
-               instruction.right == noValue;
+               instruction.right == noValue && instruction.callee == noFunction &&
+               instruction.arguments.empty();
     };
 
     // Phase 1: all blocks receive full structural validation before any
@@ -150,15 +151,25 @@ VerifyResult Verifier::verify(Function function) const
             case Opcode::storeLocal:
                 if (instruction.result != noValue || instruction.left != noValue ||
                     instruction.right != noValue || instruction.local >= function.localTypes.size() ||
-                    instruction.constant != 0)
+                    instruction.constant != 0 || instruction.callee != noFunction ||
+                    !instruction.arguments.empty())
                     report("store has a non-canonical encoding or invalid local");
                 parameterPrefix = false;
                 break;
             case Opcode::negateI64:
                 if (instruction.left != noValue || instruction.right != noValue ||
-                    instruction.local != noLocal || instruction.constant != 0)
+                    instruction.local != noLocal || instruction.constant != 0 ||
+                    instruction.callee != noFunction || !instruction.arguments.empty())
                     report("negation has non-canonical unused operands");
                 define(instruction.result, semantic::Type::i64, block.id, index, "negation");
+                parameterPrefix = false;
+                break;
+            case Opcode::callI64:
+                if (instruction.input != noValue || instruction.left != noValue ||
+                    instruction.right != noValue || instruction.local != noLocal ||
+                    instruction.constant != 0 || instruction.callee == noFunction)
+                    report("call has a non-canonical encoding");
+                define(instruction.result, semantic::Type::i64, block.id, index, "call");
                 parameterPrefix = false;
                 break;
             case Opcode::addI64:
@@ -173,7 +184,8 @@ VerifyResult Verifier::verify(Function function) const
             case Opcode::greaterI64:
             case Opcode::greaterEqualI64:
                 if (instruction.input != noValue || instruction.local != noLocal ||
-                    instruction.constant != 0)
+                    instruction.constant != 0 || instruction.callee != noFunction ||
+                    !instruction.arguments.empty())
                     report("binary instruction has non-canonical unused operands");
                 define(instruction.result, isComparison(instruction.opcode) ? semantic::Type::boolean
                                                                             : semantic::Type::i64,
@@ -304,6 +316,11 @@ VerifyResult Verifier::verify(Function function) const
                             "store");
             else if (instruction.opcode == Opcode::negateI64)
                 validateUse(instruction.input, semantic::Type::i64, block.id, index, "negation");
+            else if (instruction.opcode == Opcode::callI64)
+            {
+                for (const auto argument : instruction.arguments)
+                    validateUse(argument, semantic::Type::i64, block.id, index, "call argument");
+            }
             else if (isBinaryI64(instruction.opcode))
             {
                 validateUse(instruction.left, semantic::Type::i64, block.id, index, "binary instruction");

@@ -1,5 +1,7 @@
 #include "ember/runtime/runtime_dispatcher.hpp"
 
+#include <new>
+
 namespace ember::runtime
 {
 namespace
@@ -33,8 +35,23 @@ RuntimeDispatcher::dispatch(semantic::FunctionId functionId,
     const bool becameHot = options_.profilingEnabled &&
                            function->recordInvocation(options_.hotThreshold);
     if (becameHot)
+    {
         events_.push_back(
             {.functionId = function->id(), .invocationCount = function->profiling().invocationCount});
+        if (options_.jitEnabled)
+        {
+            // Native compilation is optional. Allocation failure and every
+            // unsupported form preserve the already-verified VM path.
+            try
+            {
+                static_cast<void>(function->compileBaselineNative(
+                    options_.forceNativeCompilationFailureForTesting));
+            }
+            catch (const std::bad_alloc &)
+            {
+            }
+        }
+    }
 
     return DispatchDecision{
         .function = function,

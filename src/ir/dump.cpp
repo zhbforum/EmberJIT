@@ -43,6 +43,8 @@ namespace
         return "gt.i64";
     case Opcode::greaterEqualI64:
         return "ge.i64";
+    case Opcode::callI64:
+        return "call.i64";
     }
     return "<invalid>";
 }
@@ -99,6 +101,16 @@ std::string dump(const VerifiedFunction &verified)
             case Opcode::greaterI64:
             case Opcode::greaterEqualI64:
                 output << " v" << instruction.left << ", v" << instruction.right;
+                break;
+            case Opcode::callI64:
+                output << " #" << instruction.callee << "(";
+                for (std::size_t index{}; index < instruction.arguments.size(); ++index)
+                {
+                    if (index != 0)
+                        output << ", ";
+                    output << "v" << instruction.arguments[index];
+                }
+                output << ')';
                 break;
             }
             output << '\n';

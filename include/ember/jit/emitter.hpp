@@ -12,18 +12,27 @@
 
 namespace ember::jit::x64
 {
-// The initial encoder deliberately exposes only Win64 volatile GPRs. It has
-// no stack-frame or call instructions, so generated leaf functions neither
-// require shadow space nor modify non-volatile registers.
+// The encoder exposes the GPRs needed by the baseline stack machine. Lowering
+// is responsible for saving every non-volatile register it uses and for Win64
+// shadow space/alignment before any generated call.
 enum class Register : std::uint8_t
 {
     rax = 0,
     rcx = 1,
     rdx = 2,
+    rbx = 3,
+    rsp = 4,
+    rbp = 5,
+    rsi = 6,
+    rdi = 7,
     r8 = 8,
     r9 = 9,
     r10 = 10,
     r11 = 11,
+    r12 = 12,
+    r13 = 13,
+    r14 = 14,
+    r15 = 15,
 };
 
 enum class Condition : std::uint8_t
@@ -117,6 +126,18 @@ class Emitter
     [[nodiscard]] bool negate(Register value);
     [[nodiscard]] bool compare(Register left, Register right);
     [[nodiscard]] bool test(Register left, Register right);
+    // Stores 0 or 1 in the low byte of `destination`; the caller must clear
+    // its upper bits first when a full-width boolean is required.
+    [[nodiscard]] bool set(Condition condition, Register destination);
+    [[nodiscard]] bool push(Register value);
+    [[nodiscard]] bool pop(Register value);
+    [[nodiscard]] bool subtractStackPointer(std::uint32_t bytes);
+    [[nodiscard]] bool addStackPointer(std::uint32_t bytes);
+    [[nodiscard]] bool load(Register destination, Register base, std::int32_t displacement);
+    [[nodiscard]] bool loadEffectiveAddress(Register destination, Register base,
+                                            std::int32_t displacement);
+    [[nodiscard]] bool store(Register base, std::int32_t displacement, Register source);
+    [[nodiscard]] bool call(Register target);
     // Encodes CQO: sign-extends RAX into the implicit RDX:RAX dividend.
     [[nodiscard]] bool signExtendRaxIntoRdx();
     // Encodes IDIV. It reads RDX:RAX, writes quotient/remainder to RAX/RDX,

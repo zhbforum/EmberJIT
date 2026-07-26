@@ -1,8 +1,11 @@
 #pragma once
 
 #include "ember/bytecode/bytecode.hpp"
+#include "ember/jit/native_abi.hpp"
 #include "ember/runtime/runtime_dispatcher.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -39,7 +42,23 @@ class VirtualMachine
     [[nodiscard]] const RuntimeFunction *function(semantic::FunctionId id) const noexcept;
 
   private:
+    struct NativeCallState
+    {
+        VirtualMachine *machine{};
+        std::vector<HotFunctionEvent> *events{};
+        std::size_t dynamicFrameCount{};
+        std::size_t nativeBridgeDepth{};
+    };
+
     explicit VirtualMachine(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options);
+    [[nodiscard]] ExecutionResult executeInternal(semantic::FunctionId entry,
+                                                  const std::vector<bytecode::Value> &arguments,
+                                                  NativeCallState &state, bool forceVm = false);
+    [[nodiscard]] static std::uint64_t nativeCallBridge(jit::NativeFrame *caller,
+                                                         std::uint64_t callee,
+                                                         const std::int64_t *arguments,
+                                                         std::uint64_t argumentCount,
+                                                         std::int64_t *result) noexcept;
 
     RuntimeOptions options_;
     RuntimeFunctionTable functions_;

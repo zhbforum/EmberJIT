@@ -5,6 +5,7 @@
 #include "ember/frontend/parser.hpp"
 #include "ember/ir/bytecode_lowerer.hpp"
 #include "ember/ir/dump.hpp"
+#include "ember/jit/baseline_compiler.hpp"
 #include "ember/runtime/vm.hpp"
 #include "ember/semantic/analyzer.hpp"
 #include "ember/semantic/typed_ast_printer.hpp"
@@ -298,6 +299,49 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
     return 0;
 }
 
+[[nodiscard]] int dumpAsm(std::string_view path, std::string contents)
+{
+    ember::semantic::AnalysisResult analysis;
+    if (!analyzeForRuntime(path, std::move(contents), analysis))
+        return 1;
+    auto compiled = ember::bytecode::Compiler{}.compile(*analysis.program);
+    if (!compiled.program)
+    {
+        for (const auto &diagnostic : compiled.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+    auto checked = ember::bytecode::Verifier{}.verify(std::move(*compiled.program));
+    if (!checked.program)
+    {
+        for (const auto &diagnostic : checked.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return 1;
+    }
+    for (const auto &function : checked.program->program().functions)
+    {
+        if (function.kind != ember::semantic::FunctionKind::user)
+            continue;
+        auto lowered = ember::ir::Lowerer{}.lower(*checked.program, function.id);
+        if (!lowered.function)
+        {
+            const auto message = lowered.diagnostics.empty() ? "not lowerable"
+                                                              : lowered.diagnostics.front().message;
+            std::cout << "fn #" << function.id << ": no native code (" << message << ")\n";
+            continue;
+        }
+        auto native = ember::jit::x64::BaselineCompiler{}.compile(*lowered.function);
+        if (!native.code)
+        {
+            std::cout << "fn #" << function.id
+                      << ": no native code (baseline subset unsupported)\n";
+            continue;
+        }
+        std::cout << "fn #" << function.id << ":\n" << native.code->listing() << '\n';
+    }
+    return 0;
+}
+
 [[nodiscard]] int runVm(std::string_view path, std::string contents, const RunOptions &options)
 {
     ember::semantic::AnalysisResult analysis;
@@ -381,7 +425,7 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
 void printUsage(std::string_view executable)
 {
     std::cerr << "usage: " << executable
-              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode|dump-ir> <file>\n"
+              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode|dump-ir|dump-asm> <file>\n"
               << "       " << executable
               << " run [--no-jit] [--jit-threshold=<non-negative-integer>] [--trace-jit] <file>\n";
 }
@@ -473,7 +517,7 @@ int main(int argumentCount, char *arguments[])
     {
         const std::string_view command{arguments[1]};
         if (command != "dump-tokens" && command != "dump-ast" && command != "dump-typed-ast" &&
-            command != "dump-bytecode" && command != "dump-ir")
+            command != "dump-bytecode" && command != "dump-ir" && command != "dump-asm")
         {
             printUsage(arguments[0]);
             return 2;
@@ -503,6 +547,8 @@ int main(int argumentCount, char *arguments[])
             return dumpBytecode(path, std::move(contents));
         if (command == "dump-ir")
             return dumpIr(path, std::move(contents));
+        if (command == "dump-asm")
+            return dumpAsm(path, std::move(contents));
     }
 
     printUsage(arguments[0]);
