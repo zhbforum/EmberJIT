@@ -11,11 +11,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-function(ember_enable_warnings target)
+function(ember_configure_compile_options target)
     if(MSVC)
         target_compile_options(${target} PRIVATE
-        /W4
-        /permissive-
+            /W4
+            /permissive-
+            /EHsc
         )
     else()
         target_compile_options(${target} PRIVATE
@@ -37,7 +38,7 @@ target_include_directories(ember_support
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-ember_enable_warnings(ember_support)
+ember_configure_compile_options(ember_support)
 
 add_library(ember_frontend
     src/frontend/ast_printer.cpp
@@ -46,20 +47,20 @@ add_library(ember_frontend
 )
 
 target_link_libraries(ember_frontend PUBLIC ember_support)
-ember_enable_warnings(ember_frontend)
+ember_configure_compile_options(ember_frontend)
 
 add_library(ember_semantic
     src/semantic/analyzer.cpp
     src/semantic/typed_ast_printer.cpp
 )
 target_link_libraries(ember_semantic PUBLIC ember_frontend)
-ember_enable_warnings(ember_semantic)
+ember_configure_compile_options(ember_semantic)
 
 add_library(ember_bytecode
     src/bytecode/bytecode.cpp
 )
 target_link_libraries(ember_bytecode PUBLIC ember_semantic)
-ember_enable_warnings(ember_bytecode)
+ember_configure_compile_options(ember_bytecode)
 
 add_library(ember_ir
     src/ir/ir.cpp
@@ -68,7 +69,7 @@ add_library(ember_ir
     src/ir/dump.cpp
 )
 target_link_libraries(ember_ir PUBLIC ember_bytecode)
-ember_enable_warnings(ember_ir)
+ember_configure_compile_options(ember_ir)
 
 add_library(ember_runtime
     src/runtime/runtime_dispatcher.cpp
@@ -77,14 +78,14 @@ add_library(ember_runtime
     src/runtime/vm.cpp
 )
 target_link_libraries(ember_runtime PUBLIC ember_bytecode)
-ember_enable_warnings(ember_runtime)
+ember_configure_compile_options(ember_runtime)
 
 add_executable(ember
     src/main.cpp
 )
 
 target_link_libraries(ember PRIVATE ember_runtime ember_ir)
-ember_enable_warnings(ember)
+ember_configure_compile_options(ember)
 
 option(EMBER_BUILD_BENCHMARKS "Build Ember runtime benchmarks" OFF)
 
@@ -93,7 +94,7 @@ if(EMBER_BUILD_BENCHMARKS)
         benchmarks/runtime_dispatch_benchmark.cpp
     )
     target_link_libraries(ember_runtime_benchmark PRIVATE ember_runtime)
-    ember_enable_warnings(ember_runtime_benchmark)
+    ember_configure_compile_options(ember_runtime_benchmark)
 endif()
 
 include(CTest)
@@ -199,7 +200,7 @@ if(BUILD_TESTING)
     target_include_directories(ember_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
     )
-    ember_enable_warnings(ember_tests)
+    ember_configure_compile_options(ember_tests)
 
     add_test(
         NAME ember_smoke
