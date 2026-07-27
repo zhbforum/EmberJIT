@@ -1,8 +1,9 @@
 #include "ember/runtime/vm.hpp"
 
+#include "ember/support/i64_semantics.hpp"
+
 #include "ember/bytecode/builtins.hpp"
 
-#include <bit>
 #include <chrono>
 #include <iostream>
 #include <limits>
@@ -31,21 +32,6 @@ struct Frame
     return {.value = std::nullopt, .error = RuntimeError{std::move(code), std::move(message)}};
 }
 
-[[nodiscard]] auto wrapAdd(std::int64_t left, std::int64_t right) -> std::int64_t
-{
-    return std::bit_cast<std::int64_t>(static_cast<std::uint64_t>(left) +
-                                       static_cast<std::uint64_t>(right));
-}
-[[nodiscard]] auto wrapSub(std::int64_t left, std::int64_t right) -> std::int64_t
-{
-    return std::bit_cast<std::int64_t>(static_cast<std::uint64_t>(left) -
-                                       static_cast<std::uint64_t>(right));
-}
-[[nodiscard]] auto wrapMul(std::int64_t left, std::int64_t right) -> std::int64_t
-{
-    return std::bit_cast<std::int64_t>(static_cast<std::uint64_t>(left) *
-                                       static_cast<std::uint64_t>(right));
-}
 } // namespace
 
 VirtualMachine::VirtualMachine(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options)
@@ -65,8 +51,11 @@ ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
                                         const std::vector<bytecode::Value> &arguments)
 {
     std::vector<HotFunctionEvent> hotEvents;
-    NativeCallState state{.machine = this, .events = &hotEvents, .dynamicFrameCount = 0,
-                          .nativeBridgeDepth = 0};
+    NativeCallState state{.machine = this,
+                          .events = &hotEvents,
+                          .dynamicFrameCount = 0,
+                          .nativeBridgeDepth = 0,
+                          .forceNativeCallFailureForTesting = options_.forceNativeCallFailureForTesting};
     auto result = executeInternal(entry, arguments, state);
     return {.result = std::move(result), .hotEvents = std::move(hotEvents)};
 }
@@ -174,7 +163,7 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
             ++frame.pc;
             break;
         case negateI64:
-            stack.push_back(wrapSub(0, std::get<std::int64_t>(popValue())));
+            stack.push_back(support::i64::negate(std::get<std::int64_t>(popValue())));
             ++frame.pc;
             break;
         case negateF64:
@@ -187,9 +176,9 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
         {
             const auto right = std::get<std::int64_t>(popValue());
             const auto left = std::get<std::int64_t>(popValue());
-            stack.push_back(instruction.opcode == addI64   ? wrapAdd(left, right)
-                            : instruction.opcode == subI64 ? wrapSub(left, right)
-                                                           : wrapMul(left, right));
+            stack.push_back(instruction.opcode == addI64   ? support::i64::add(left, right)
+                            : instruction.opcode == subI64 ? support::i64::subtract(left, right)
+                                                           : support::i64::multiply(left, right));
             ++frame.pc;
             break;
         }
@@ -389,6 +378,8 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame *caller, std::ui
 
     auto *state = static_cast<NativeCallState *>(caller->callContext);
     if (state->machine == nullptr || state->events == nullptr)
+        return failBridge(NativeFrameError::invalidCall);
+    if (state->forceNativeCallFailureForTesting)
         return failBridge(NativeFrameError::invalidCall);
     bool depthIncremented{};
     try

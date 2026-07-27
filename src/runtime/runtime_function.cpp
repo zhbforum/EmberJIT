@@ -1,6 +1,7 @@
 #include "ember/runtime/runtime_function.hpp"
 
 #include "ember/ir/bytecode_lowerer.hpp"
+#include "ember/ir/optimization.hpp"
 #include "ember/jit/baseline_compiler.hpp"
 #include "ember/runtime/native_code.hpp"
 
@@ -29,7 +30,8 @@ ExecutionTier RuntimeFunction::selectExecutionTier(bool jitEnabled) const noexce
                : ExecutionTier::virtualMachine;
 }
 
-bool RuntimeFunction::compileBaselineNative(bool forceFailureForTesting)
+bool RuntimeFunction::compileBaselineNative(bool forceFailureForTesting,
+                                            bool disableOptimizationForTesting)
 {
     if (nativeCode_ || !nativeSource_)
         return nativeCode_ != nullptr;
@@ -37,6 +39,13 @@ bool RuntimeFunction::compileBaselineNative(bool forceFailureForTesting)
     auto lowered = ir::Lowerer{}.lower(*nativeSource_, bytecode_.id);
     if (!lowered.function)
         return false;
+    if (!disableOptimizationForTesting)
+    {
+        auto optimized = ir::OptimizationPipeline{}.run(*lowered.function);
+        if (!optimized.function)
+            return false;
+        lowered.function = std::move(optimized.function);
+    }
     auto compiled = jit::x64::BaselineCompiler{
         {.forceFailureForTesting = forceFailureForTesting}}
                         .compile(*lowered.function);

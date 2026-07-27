@@ -52,7 +52,8 @@ class RuntimeFunction
     // selection. This prevents callers from bypassing the common call path.
     [[nodiscard]] bool recordInvocation(std::uint64_t hotThreshold) noexcept;
     [[nodiscard]] ExecutionTier selectExecutionTier(bool jitEnabled) const noexcept;
-    [[nodiscard]] bool compileBaselineNative(bool forceFailureForTesting = false);
+    [[nodiscard]] bool compileBaselineNative(bool forceFailureForTesting = false,
+                                             bool disableOptimizationForTesting = false);
     [[nodiscard]] NativeInvocation invokeNativeI64Frame(std::vector<std::int64_t> &locals,
                                                          void *callContext,
                                                          jit::NativeCallBridge callBridge) const;
