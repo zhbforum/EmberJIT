@@ -45,7 +45,8 @@ RuntimeDispatcher::dispatch(semantic::FunctionId functionId,
             try
             {
                 static_cast<void>(function->compileBaselineNative(
-                    options_.forceNativeCompilationFailureForTesting));
+                    options_.forceNativeCompilationFailureForTesting,
+                    options_.disableOptimizationForTesting));
             }
             catch (const std::bad_alloc &)
             {

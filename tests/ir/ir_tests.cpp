@@ -3,11 +3,13 @@
 #include "ember/frontend/parser.hpp"
 #include "ember/ir/bytecode_lowerer.hpp"
 #include "ember/ir/dump.hpp"
+#include "ember/ir/optimization.hpp"
 #include "ember/ir/verifier.hpp"
 #include "ember/semantic/analyzer.hpp"
 #include "test_harness.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -412,5 +414,309 @@ EMBER_TEST("IR lowering fail-closes unsupported forms with precise diagnostics")
     const auto invalidId = ember::ir::Lowerer{}.lower(*callProgram, 999);
     tests.expect(!invalidId.function && invalidId.failure == ember::ir::LoweringFailure::invalidInput,
                  "missing function id is classified as invalid lowerer input");
+}
+
+EMBER_TEST("IR constant folding preserves wrapping i64 semantics and re-verifies its output")
+{
+    auto verified = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, std::numeric_limits<std::int64_t>::max()),
+                           Instruction::constantI64(1, 1),
+                           Instruction::binaryI64(Opcode::addI64, 2, 0, 1),
+                           Instruction::negateI64(3, 2)},
+          .terminator = Terminator::returnValue(3)}},
+        {Type::i64, Type::i64, Type::i64, Type::i64}));
+    tests.expect(verified.function.has_value(), "constant-folding fixture verifies");
+    if (!verified.function)
+        return;
+
+    const auto folded = ember::ir::ConstantFoldingPass{}.run(*verified.function);
+    tests.expect(folded.function.has_value(), "constant folding postcondition passes the IR verifier");
+    if (!folded.function)
+        return;
+    const auto &instructions = folded.function->function().blocks[0].instructions;
+    tests.expect(instructions[2].opcode == Opcode::constantI64 &&
+                     instructions[2].constant == std::numeric_limits<std::int64_t>::min() &&
+                     instructions[3].opcode == Opcode::constantI64 &&
+                     instructions[3].constant == std::numeric_limits<std::int64_t>::min(),
+                 "constant folding uses defined two's-complement wraparound");
+
+    auto divisionFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 1), Instruction::constantI64(1, 0),
+                           Instruction::binaryI64(Opcode::divI64, 2, 0, 1)},
+          .terminator = Terminator::returnValue(2)}},
+        {Type::i64, Type::i64, Type::i64}));
+    tests.expect(divisionFixture.function.has_value(), "division folding fixture verifies");
+    if (!divisionFixture.function)
+        return;
+    const auto divisionFolded = ember::ir::ConstantFoldingPass{}.run(*divisionFixture.function);
+    tests.expect(divisionFolded.function.has_value() &&
+                     divisionFolded.function->function().blocks[0].instructions[2].opcode == Opcode::divI64,
+                 "constant folding retains division so its runtime error remains observable");
+
+    auto remainderFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 1), Instruction::constantI64(1, 0),
+                           Instruction::binaryI64(Opcode::remI64, 2, 0, 1)},
+          .terminator = Terminator::returnValue(2)}},
+        {Type::i64, Type::i64, Type::i64}));
+    tests.expect(remainderFixture.function.has_value(), "remainder folding fixture verifies");
+    if (!remainderFixture.function)
+        return;
+    const auto remainderFolded = ember::ir::ConstantFoldingPass{}.run(*remainderFixture.function);
+    tests.expect(remainderFolded.function.has_value() &&
+                     remainderFolded.function->function().blocks[0].instructions[2].opcode == Opcode::remI64,
+                 "constant folding retains remainder so its runtime error remains observable");
+
+    auto comparisonFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 2), Instruction::constantI64(1, 3),
+                           Instruction::binaryI64(Opcode::lessI64, 2, 0, 1),
+                           Instruction::constantI64(3, 0)},
+          .terminator = Terminator::returnValue(3)}},
+        {Type::i64, Type::i64, Type::boolean, Type::i64}));
+    tests.expect(comparisonFixture.function.has_value(), "standalone comparison fixture verifies");
+    if (!comparisonFixture.function)
+        return;
+    const auto comparisonFolded = ember::ir::ConstantFoldingPass{}.run(*comparisonFixture.function);
+    tests.expect(comparisonFolded.function.has_value() &&
+                     comparisonFolded.function->function().blocks[0].instructions[2].opcode == Opcode::lessI64,
+                 "constant folding leaves comparisons to CFG simplification's terminator contract");
+}
+
+EMBER_TEST("IR propagation and DCE retain required effects while removing dead pure values")
+{
+    auto propagationFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 7), Instruction::storeLocal(0, 0),
+                           Instruction::loadLocal(1, 0)},
+          .terminator = Terminator::returnValue(1)}},
+        {Type::i64, Type::i64}, {Type::i64}));
+    tests.expect(propagationFixture.function.has_value(), "constant-propagation fixture verifies");
+    if (!propagationFixture.function)
+        return;
+    const auto propagated = ember::ir::ConstantPropagationPass{}.run(*propagationFixture.function);
+    tests.expect(propagated.function.has_value() &&
+                     propagated.function->function().blocks[0].instructions[2].opcode == Opcode::constantI64,
+                 "local constant propagation replaces a same-block load and re-verifies IR");
+
+    auto overwriteFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 0), Instruction::storeLocal(0, 0),
+                           Instruction::constantI64(1, 7), Instruction::storeLocal(0, 1),
+                           Instruction::constantI64(2, 9), Instruction::storeLocal(1, 2),
+                           Instruction::loadLocal(3, 0), Instruction::loadLocal(4, 1)},
+          .terminator = Terminator::returnValue(3)}},
+        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64}, {Type::i64, Type::i64}));
+    tests.expect(overwriteFixture.function.has_value(), "multi-local propagation fixture verifies");
+    if (!overwriteFixture.function)
+        return;
+    const auto overwritten = ember::ir::ConstantPropagationPass{}.run(*overwriteFixture.function);
+    tests.expect(overwritten.function.has_value() &&
+                     overwritten.function->function().blocks[0].instructions[6].constant == 7 &&
+                     overwritten.function->function().blocks[0].instructions[7].constant == 9,
+                 "propagation handles zero, overwrites, and independent locals");
+
+    auto invalidationFixture = ember::ir::Verifier{}.verify(
+        {.id = 0,
+         .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
+         .localTypes = {Type::i64},
+         .valueTypes = {Type::i64, Type::i64, Type::i64},
+         .blocks = {{.id = 0,
+                     .instructions = {Instruction::parameter(0, 0), Instruction::constantI64(1, 7),
+                                      Instruction::storeLocal(0, 1), Instruction::storeLocal(0, 0),
+                                      Instruction::loadLocal(2, 0)},
+                     .terminator = Terminator::returnValue(2)}}});
+    tests.expect(invalidationFixture.function.has_value(), "nonconstant-store propagation fixture verifies");
+    if (!invalidationFixture.function)
+        return;
+    const auto invalidated = ember::ir::ConstantPropagationPass{}.run(*invalidationFixture.function);
+    tests.expect(invalidated.function.has_value() &&
+                     invalidated.function->function().blocks[0].instructions[4].opcode == Opcode::loadLocal,
+                 "a nonconstant store invalidates a previous local constant fact");
+
+    auto edgeFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 7), Instruction::storeLocal(0, 0)},
+          .terminator = Terminator::branch(1)},
+         {.id = 1,
+          .instructions = {Instruction::loadLocal(1, 0)},
+          .terminator = Terminator::returnValue(1)}},
+        {Type::i64, Type::i64}, {Type::i64}));
+    tests.expect(edgeFixture.function.has_value(), "cross-edge propagation fixture verifies");
+    if (!edgeFixture.function)
+        return;
+    const auto edgePropagated = ember::ir::ConstantPropagationPass{}.run(*edgeFixture.function);
+    tests.expect(edgePropagated.function.has_value() &&
+                     edgePropagated.function->function().blocks[1].instructions[0].opcode == Opcode::loadLocal,
+                 "constant propagation does not cross CFG edges");
+
+    auto refoldingFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 2), Instruction::storeLocal(0, 0),
+                           Instruction::loadLocal(1, 0), Instruction::constantI64(2, 3),
+                           Instruction::binaryI64(Opcode::addI64, 3, 1, 2)},
+          .terminator = Terminator::returnValue(3)}},
+        {Type::i64, Type::i64, Type::i64, Type::i64}, {Type::i64}));
+    tests.expect(refoldingFixture.function.has_value(), "post-propagation folding fixture verifies");
+    if (!refoldingFixture.function)
+        return;
+    const auto refolded = ember::ir::OptimizationPipeline{}.run(*refoldingFixture.function);
+    tests.expect(refolded.function.has_value() &&
+                     ember::ir::dump(*refolded.function).find("const.i64 5") != std::string::npos,
+                 "pipeline folds arithmetic newly exposed by constant propagation");
+
+    auto dceFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 1), Instruction::constantI64(1, 42)},
+          .terminator = Terminator::returnValue(1)}},
+        {Type::i64, Type::i64}));
+    tests.expect(dceFixture.function.has_value(), "DCE fixture verifies");
+    if (!dceFixture.function)
+        return;
+    const auto eliminated = ember::ir::DeadCodeEliminationPass{}.run(*dceFixture.function);
+    tests.expect(eliminated.function.has_value() && eliminated.function->function().valueTypes.size() == 1 &&
+                     eliminated.function->function().blocks[0].instructions.size() == 1 &&
+                     eliminated.function->function().blocks[0].terminator.value == 0,
+                 "DCE removes only dead pure values and compacts virtual-register ids");
+
+    auto effectFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 1), Instruction::constantI64(1, 0),
+                           Instruction::binaryI64(Opcode::divI64, 2, 0, 1),
+                           Instruction::binaryI64(Opcode::remI64, 3, 0, 1),
+                           Instruction::callI64(4, 7, {0}), Instruction::constantI64(5, 42)},
+          .terminator = Terminator::returnValue(5)}},
+        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64}));
+    tests.expect(effectFixture.function.has_value(), "DCE observable-effect fixture verifies");
+    if (!effectFixture.function)
+        return;
+    const auto effectsRetained = ember::ir::DeadCodeEliminationPass{}.run(*effectFixture.function);
+    tests.expect(effectsRetained.function.has_value() &&
+                     effectsRetained.function->function().blocks[0].instructions.size() == 6,
+                 "DCE retains dead-result division, remainder, and calls because they are observable");
+
+    auto remapFixture = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 99), Instruction::constantI64(1, 7),
+                           Instruction::constantI64(2, 8), Instruction::binaryI64(Opcode::addI64, 3, 1, 2),
+                           Instruction::storeLocal(0, 3), Instruction::loadLocal(4, 0),
+                           Instruction::callI64(5, 7, {4, 1}), Instruction::constantI64(6, 42)},
+          .terminator = Terminator::returnValue(6)}},
+        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64}, {Type::i64}));
+    tests.expect(remapFixture.function.has_value(), "DCE remapping fixture verifies");
+    if (!remapFixture.function)
+        return;
+    const auto remapped = ember::ir::DeadCodeEliminationPass{}.run(*remapFixture.function);
+    tests.expect(remapped.function.has_value() && remapped.function->function().valueTypes.size() == 6 &&
+                     remapped.function->function().blocks[0].instructions[5].arguments ==
+                         std::vector<ember::ir::ValueId>{3, 0},
+                 "DCE remaps binary inputs, stores, loads, and call arguments after deletion");
+    if (!remapped.function)
+        return;
+    const auto eliminatedAgain = ember::ir::DeadCodeEliminationPass{}.run(*remapped.function);
+    tests.expect(eliminatedAgain.function.has_value() &&
+                     ember::ir::dump(*eliminatedAgain.function) == ember::ir::dump(*remapped.function),
+                 "DCE is idempotent");
+}
+
+EMBER_TEST("IR default optimization pipeline simplifies constant CFG and exposes the result in dumps")
+{
+    auto verified = ember::ir::Verifier{}.verify(baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 2), Instruction::constantI64(1, 3),
+                           Instruction::binaryI64(Opcode::addI64, 2, 0, 1),
+                           Instruction::constantI64(3, 4),
+                           Instruction::binaryI64(Opcode::mulI64, 4, 2, 3),
+                           Instruction::constantI64(5, 0),
+                           Instruction::binaryI64(Opcode::equalI64, 6, 4, 5),
+                           Instruction::storeLocal(0, 4)},
+          .terminator = Terminator::branchIfFalse(6, 2, 1)},
+         {.id = 1,
+          .instructions = {Instruction::constantI64(7, 99)},
+          .terminator = Terminator::returnValue(7)},
+         {.id = 2,
+          .instructions = {Instruction::loadLocal(8, 0)},
+          .terminator = Terminator::returnValue(8)}},
+        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::boolean,
+         Type::i64, Type::i64},
+        {Type::i64}));
+    tests.expect(verified.function.has_value(), "constant-CFG fixture verifies");
+    if (!verified.function)
+        return;
+
+    const auto optimized = ember::ir::OptimizationPipeline{}.run(*verified.function);
+    tests.expect(optimized.function.has_value(), "every default pass preserves the verifier contract");
+    if (!optimized.function)
+        return;
+    const auto &function = optimized.function->function();
+    const auto dump = ember::ir::dump(*optimized.function);
+    tests.expect(function.blocks.size() == 2 && function.blocks[0].terminator.kind == TerminatorKind::branch &&
+                     function.blocks[0].terminator.trueTarget == 1 &&
+                     dump.find("const.i64 20") != std::string::npos &&
+                     dump.find("add.i64") == std::string::npos &&
+                     dump.find("branch_if_false") == std::string::npos,
+                 "pipeline folds constants, removes the dead successor, and dumps optimized CFG");
+    const auto optimizedAgain = ember::ir::OptimizationPipeline{}.run(*optimized.function);
+    tests.expect(optimizedAgain.function.has_value() &&
+                     ember::ir::dump(*optimizedAgain.function) == ember::ir::dump(*optimized.function),
+                 "default optimization pipeline is idempotent");
+}
+
+EMBER_TEST("CFG simplification evaluates every i64 comparison only in branch conditions")
+{
+    const auto outcome = [](Opcode opcode, std::int64_t left, std::int64_t right)
+        -> std::optional<std::int64_t>
+    {
+        auto verified = ember::ir::Verifier{}.verify(baseI64Function(
+            {{.id = 0,
+              .instructions = {Instruction::constantI64(0, left), Instruction::constantI64(1, right),
+                               Instruction::binaryI64(opcode, 2, 0, 1)},
+              .terminator = Terminator::branchIfFalse(2, 2, 1)},
+             {.id = 1,
+              .instructions = {Instruction::constantI64(3, 11)},
+              .terminator = Terminator::returnValue(3)},
+             {.id = 2,
+              .instructions = {Instruction::constantI64(4, 22)},
+              .terminator = Terminator::returnValue(4)}},
+            {Type::i64, Type::i64, Type::boolean, Type::i64, Type::i64}));
+        if (!verified.function)
+            return std::nullopt;
+        auto simplified = ember::ir::CfgSimplificationPass{}.run(*verified.function);
+        if (!simplified.function || simplified.function->function().blocks.size() != 2)
+            return std::nullopt;
+        return simplified.function->function().blocks[1].instructions[0].constant;
+    };
+
+    tests.expect(outcome(Opcode::equalI64, 4, 4) == 11 && outcome(Opcode::equalI64, 4, 5) == 22 &&
+                     outcome(Opcode::notEqualI64, 4, 4) == 22 && outcome(Opcode::notEqualI64, 4, 5) == 11 &&
+                     outcome(Opcode::lessI64, 4, 5) == 11 && outcome(Opcode::lessI64, 5, 4) == 22 &&
+                     outcome(Opcode::lessEqualI64, 4, 4) == 11 && outcome(Opcode::lessEqualI64, 5, 4) == 22 &&
+                     outcome(Opcode::greaterI64, 5, 4) == 11 && outcome(Opcode::greaterI64, 4, 5) == 22 &&
+                     outcome(Opcode::greaterEqualI64, 4, 4) == 11 &&
+                     outcome(Opcode::greaterEqualI64, 4, 5) == 22,
+                 "CFG simplification chooses the correct successor for true and false comparisons");
+
+    auto sameTarget = ember::ir::Verifier{}.verify(
+        {.id = 0,
+         .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
+         .localTypes = {Type::i64},
+         .valueTypes = {Type::i64, Type::i64, Type::boolean, Type::i64},
+         .blocks = {{.id = 0,
+                     .instructions = {Instruction::parameter(0, 0), Instruction::constantI64(1, 0),
+                                      Instruction::binaryI64(Opcode::equalI64, 2, 0, 1)},
+                     .terminator = Terminator::branchIfFalse(2, 1, 1)},
+                    {.id = 1,
+                     .instructions = {Instruction::constantI64(3, 7)},
+                     .terminator = Terminator::returnValue(3)}}});
+    tests.expect(sameTarget.function.has_value(), "same-target CFG fixture verifies");
+    if (!sameTarget.function)
+        return;
+    const auto sameTargetSimplified = ember::ir::CfgSimplificationPass{}.run(*sameTarget.function);
+    tests.expect(sameTargetSimplified.function.has_value() &&
+                     sameTargetSimplified.function->function().blocks[0].terminator.kind ==
+                         TerminatorKind::branch,
+                 "CFG simplification removes a conditional branch with identical targets");
 }
 } // namespace

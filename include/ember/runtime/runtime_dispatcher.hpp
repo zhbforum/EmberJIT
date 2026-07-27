@@ -26,6 +26,12 @@ struct RuntimeOptions
     // Test-only fault injection. It proves failed compilation leaves the VM
     // entry point intact; no command-line option exposes this behavior.
     bool forceNativeCompilationFailureForTesting{};
+    // Test-only seam for VM/unoptimized-native/optimized-native differential
+    // tests. Production dispatch always enables the optimization pipeline.
+    bool disableOptimizationForTesting{};
+    // Test-only fault injection for the native call bridge. VM-only execution
+    // never enters this bridge, so this isolates native error propagation.
+    bool forceNativeCallFailureForTesting{};
 };
 
 struct DispatchDecision

@@ -5,6 +5,7 @@
 #include "ember/frontend/parser.hpp"
 #include "ember/ir/bytecode_lowerer.hpp"
 #include "ember/ir/dump.hpp"
+#include "ember/ir/optimization.hpp"
 #include "ember/jit/baseline_compiler.hpp"
 #include "ember/runtime/vm.hpp"
 #include "ember/semantic/analyzer.hpp"
@@ -87,6 +88,14 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
                      .code = "E5001",
                      .message = std::move(message),
                      .primarySpan = span});
+}
+
+void printOptimizationFailure(const ember::ir::OptimizationResult &result)
+{
+    const auto pass = result.failedPass ? ember::ir::optimizationPassName(*result.failedPass) : "unknown";
+    std::cerr << "IR optimization error[" << pass << "]\n";
+    for (const auto &diagnostic : result.diagnostics)
+        std::cerr << "  " << diagnostic.code << ": " << diagnostic.message << '\n';
 }
 
 [[nodiscard]] int dumpTokens(std::string_view path, std::string contents)
@@ -288,7 +297,13 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
     {
         if (lowered.result.function)
         {
-            std::cout << ember::ir::dump(*lowered.result.function);
+            const auto optimized = ember::ir::OptimizationPipeline{}.run(*lowered.result.function);
+            if (!optimized.function)
+            {
+                printOptimizationFailure(optimized);
+                return 1;
+            }
+            std::cout << ember::ir::dump(*optimized.function);
             continue;
         }
         const auto message = lowered.result.diagnostics.empty()
@@ -330,7 +345,17 @@ void printEntryPointDiagnostic(std::string_view path, const ember::support::Sour
             std::cout << "fn #" << function.id << ": no native code (" << message << ")\n";
             continue;
         }
-        auto native = ember::jit::x64::BaselineCompiler{}.compile(*lowered.function);
+        auto optimized = ember::ir::OptimizationPipeline{}.run(*lowered.function);
+        if (!optimized.function)
+        {
+            const auto pass = optimized.failedPass
+                                  ? ember::ir::optimizationPassName(*optimized.failedPass)
+                                  : "unknown";
+            std::cout << "fn #" << function.id << ": no native code (IR optimization failed in "
+                      << pass << ")\n";
+            continue;
+        }
+        auto native = ember::jit::x64::BaselineCompiler{}.compile(*optimized.function);
         if (!native.code)
         {
             std::cout << "fn #" << function.id

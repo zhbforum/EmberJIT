@@ -48,6 +48,7 @@ class VirtualMachine
         std::vector<HotFunctionEvent> *events{};
         std::size_t dynamicFrameCount{};
         std::size_t nativeBridgeDepth{};
+        bool forceNativeCallFailureForTesting{};
     };
 
     explicit VirtualMachine(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options);
