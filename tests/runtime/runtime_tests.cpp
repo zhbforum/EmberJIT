@@ -910,6 +910,232 @@ EMBER_TEST("native i64 wrap arithmetic and signed comparisons match the VM")
                  "wrapping i64 arithmetic and all signed comparison lowerings match the VM");
 }
 
+EMBER_TEST("optimized native constant CFG matches the unoptimized VM")
+{
+    const auto makeProgram = []
+    {
+        return Program{.functions = {
+                           {.id = 0,
+                            .kind = FunctionKind::user,
+                            .signature = {.parameterTypes = {}, .returnType = Type::i64},
+                            .localCount = 1,
+                            .localTypes = {Type::i64},
+                            .code = {{.opcode = Opcode::constant,
+                                      .operand = 0,
+                                      .value = ember::bytecode::Value{std::int64_t{2}}},
+                                     {.opcode = Opcode::constant,
+                                      .operand = 0,
+                                      .value = ember::bytecode::Value{std::int64_t{3}}},
+                                     {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
+                                     {.opcode = Opcode::store, .operand = 0, .value = std::nullopt},
+                                     {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                                     {.opcode = Opcode::constant,
+                                      .operand = 0,
+                                      .value = ember::bytecode::Value{std::int64_t{20}}},
+                                     {.opcode = Opcode::equalI64, .operand = 0, .value = std::nullopt},
+                                     {.opcode = Opcode::jumpIfFalse, .operand = 10, .value = std::nullopt},
+                                     {.opcode = Opcode::constant,
+                                      .operand = 0,
+                                      .value = ember::bytecode::Value{std::int64_t{99}}},
+                                     {.opcode = Opcode::returnValue,
+                                      .operand = 0,
+                                      .value = std::nullopt},
+                                     {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                                     {.opcode = Opcode::returnValue,
+                                      .operand = 0,
+                                      .value = std::nullopt}}},
+                       }};
+    };
+
+    auto jitProgram = verify(makeProgram());
+    auto unoptimizedProgram = verify(makeProgram());
+    auto vmProgram = verify(makeProgram());
+    if (!jitProgram || !unoptimizedProgram || !vmProgram)
+    {
+        tests.expect(false, "optimized-CFG bytecode verifies");
+        return;
+    }
+    auto jitVm = ember::runtime::VirtualMachine::create(
+        std::move(*jitProgram), {.hotThreshold = 1, .jitEnabled = true, .profilingEnabled = true});
+    auto unoptimizedVm = ember::runtime::VirtualMachine::create(
+        std::move(*unoptimizedProgram),
+        {.hotThreshold = 1,
+         .jitEnabled = true,
+         .profilingEnabled = true,
+         .disableOptimizationForTesting = true});
+    auto vm = ember::runtime::VirtualMachine::create(
+        std::move(*vmProgram), {.hotThreshold = 1, .jitEnabled = false, .profilingEnabled = true});
+    const auto jitReport = jitVm.execute(0);
+    const auto unoptimizedReport = unoptimizedVm.execute(0);
+    const auto vmReport = vm.execute(0);
+    const auto *function = jitVm.function(0);
+    const auto *unoptimizedFunction = unoptimizedVm.function(0);
+    tests.expect(!jitReport.result.error && !unoptimizedReport.result.error && !vmReport.result.error &&
+                     jitReport.result.value == ember::bytecode::Value{std::int64_t{5}} &&
+                     jitReport.result.value == unoptimizedReport.result.value &&
+                     jitReport.result.value == vmReport.result.value && function != nullptr &&
+                     unoptimizedFunction != nullptr
+#if EMBER_HAS_WIN64_JIT
+                     && function->tier() == ember::runtime::ExecutionTier::native &&
+                     unoptimizedFunction->tier() == ember::runtime::ExecutionTier::native
+#else
+                     && function->tier() == ember::runtime::ExecutionTier::virtualMachine &&
+                     unoptimizedFunction->tier() == ember::runtime::ExecutionTier::virtualMachine
+#endif
+                 ,
+                 "optimized and unoptimized native CFGs preserve the VM result");
+}
+
+EMBER_TEST("optimized and unoptimized native code preserve VM runtime errors")
+{
+    const auto checkI64Error = [](Opcode operation, std::int64_t left, std::int64_t right)
+    {
+        const auto makeProgram = [operation]
+        {
+            return Program{.functions = {
+                               {.id = 0,
+                                .kind = FunctionKind::user,
+                                .signature = {.parameterTypes = {Type::i64, Type::i64},
+                                              .returnType = Type::i64},
+                                .localCount = 2,
+                                .localTypes = {Type::i64, Type::i64},
+                                .code = {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                                         {.opcode = Opcode::load, .operand = 1, .value = std::nullopt},
+                                         {.opcode = operation, .operand = 0, .value = std::nullopt},
+                                         {.opcode = Opcode::returnValue,
+                                          .operand = 0,
+                                          .value = std::nullopt}}},
+                           }};
+        };
+        auto optimizedProgram = verify(makeProgram());
+        auto unoptimizedProgram = verify(makeProgram());
+        auto vmProgram = verify(makeProgram());
+        if (!optimizedProgram || !unoptimizedProgram || !vmProgram)
+            return false;
+        auto optimizedVm = ember::runtime::VirtualMachine::create(
+            std::move(*optimizedProgram), {.hotThreshold = 1, .jitEnabled = true, .profilingEnabled = true});
+        auto unoptimizedVm = ember::runtime::VirtualMachine::create(
+            std::move(*unoptimizedProgram),
+            {.hotThreshold = 1,
+             .jitEnabled = true,
+             .profilingEnabled = true,
+             .disableOptimizationForTesting = true});
+        auto vm = ember::runtime::VirtualMachine::create(
+            std::move(*vmProgram), {.hotThreshold = 1, .jitEnabled = false, .profilingEnabled = true});
+        const auto optimized = optimizedVm.execute(0, {left, right});
+        const auto unoptimized = unoptimizedVm.execute(0, {left, right});
+        const auto interpreted = vm.execute(0, {left, right});
+        return optimized.result.error && unoptimized.result.error && interpreted.result.error &&
+               optimized.result.error->code == interpreted.result.error->code &&
+               unoptimized.result.error->code == interpreted.result.error->code;
+    };
+
+    const auto recursiveFrameLimit = []
+    {
+        const auto makeProgram = []
+        {
+            return Program{.functions = {
+                               {.id = 0,
+                                .kind = FunctionKind::user,
+                                .signature = {.parameterTypes = {}, .returnType = Type::i64},
+                                .localCount = 0,
+                                .localTypes = {},
+                                .code = {{.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
+                                         {.opcode = Opcode::returnValue,
+                                          .operand = 0,
+                                          .value = std::nullopt}}},
+                           }};
+        };
+        auto optimizedProgram = verify(makeProgram());
+        auto unoptimizedProgram = verify(makeProgram());
+        auto vmProgram = verify(makeProgram());
+        if (!optimizedProgram || !unoptimizedProgram || !vmProgram)
+            return false;
+        auto optimizedVm = ember::runtime::VirtualMachine::create(
+            std::move(*optimizedProgram), {.hotThreshold = 1, .jitEnabled = true, .profilingEnabled = true});
+        auto unoptimizedVm = ember::runtime::VirtualMachine::create(
+            std::move(*unoptimizedProgram),
+            {.hotThreshold = 1,
+             .jitEnabled = true,
+             .profilingEnabled = true,
+             .disableOptimizationForTesting = true});
+        auto vm = ember::runtime::VirtualMachine::create(
+            std::move(*vmProgram), {.hotThreshold = 1, .jitEnabled = false, .profilingEnabled = true});
+        const auto optimized = optimizedVm.execute(0);
+        const auto unoptimized = unoptimizedVm.execute(0);
+        const auto interpreted = vm.execute(0);
+        return optimized.result.error && unoptimized.result.error && interpreted.result.error &&
+               optimized.result.error->code == "R5006" &&
+               unoptimized.result.error->code == interpreted.result.error->code &&
+               optimized.result.error->code == interpreted.result.error->code;
+    };
+
+    tests.expect(checkI64Error(Opcode::divI64, 1, 0) &&
+                     checkI64Error(Opcode::divI64, std::numeric_limits<std::int64_t>::min(), -1) &&
+                     checkI64Error(Opcode::remI64, 1, 0) &&
+                     checkI64Error(Opcode::remI64, std::numeric_limits<std::int64_t>::min(), -1) &&
+                     recursiveFrameLimit(),
+                 "VM and both execution modes preserve runtime-error codes");
+}
+
+#if EMBER_HAS_WIN64_JIT
+EMBER_TEST("optimized and unoptimized native code preserve bridge failures")
+{
+    const auto makeProgram = []
+    {
+        return Program{.functions = {
+                           {.id = 0,
+                            .kind = FunctionKind::user,
+                            .signature = {.parameterTypes = {}, .returnType = Type::i64},
+                            .localCount = 0,
+                            .localTypes = {},
+                            .code = {{.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
+                                     {.opcode = Opcode::returnValue,
+                                      .operand = 0,
+                                      .value = std::nullopt}}},
+                           {.id = 1,
+                            .kind = FunctionKind::user,
+                            .signature = {.parameterTypes = {}, .returnType = Type::i64},
+                            .localCount = 0,
+                            .localTypes = {},
+                            .code = {{.opcode = Opcode::constant,
+                                      .operand = 0,
+                                      .value = ember::bytecode::Value{std::int64_t{7}}},
+                                     {.opcode = Opcode::returnValue,
+                                      .operand = 0,
+                                      .value = std::nullopt}}},
+                       }};
+    };
+    auto optimizedProgram = verify(makeProgram());
+    auto unoptimizedProgram = verify(makeProgram());
+    if (!optimizedProgram || !unoptimizedProgram)
+    {
+        tests.expect(false, "native bridge-failure fixture verifies");
+        return;
+    }
+    const ember::runtime::RuntimeOptions optimizedOptions{
+        .hotThreshold = 1,
+        .jitEnabled = true,
+        .profilingEnabled = true,
+        .forceNativeCallFailureForTesting = true};
+    const ember::runtime::RuntimeOptions unoptimizedOptions{
+        .hotThreshold = 1,
+        .jitEnabled = true,
+        .profilingEnabled = true,
+        .disableOptimizationForTesting = true,
+        .forceNativeCallFailureForTesting = true};
+    auto optimizedVm = ember::runtime::VirtualMachine::create(std::move(*optimizedProgram), optimizedOptions);
+    auto unoptimizedVm =
+        ember::runtime::VirtualMachine::create(std::move(*unoptimizedProgram), unoptimizedOptions);
+    const auto optimized = optimizedVm.execute(0);
+    const auto unoptimized = unoptimizedVm.execute(0);
+    tests.expect(optimized.result.error && unoptimized.result.error &&
+                     optimized.result.error->code == "R5003" &&
+                     optimized.result.error->code == unoptimized.result.error->code,
+                 "optimized and unoptimized native calls preserve bridge-failure code R5003");
+}
+#endif
+
 EMBER_TEST("injected native compilation failure retains VM dispatch and result")
 {
     auto verified = verify({.functions = {

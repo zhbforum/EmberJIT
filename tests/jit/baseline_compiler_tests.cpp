@@ -2,6 +2,7 @@
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
 #include "ember/ir/bytecode_lowerer.hpp"
+#include "ember/ir/optimization.hpp"
 #include "ember/ir/verifier.hpp"
 #include "ember/jit/baseline_compiler.hpp"
 #include "ember/jit/platform.hpp"
@@ -205,6 +206,25 @@ EMBER_TEST("baseline compiler supports flexible frame parameters and guarded div
         }
     }
 #endif
+}
+
+EMBER_TEST("baseline optimization pipeline reduces code size for a constant CFG")
+{
+    auto function = lower("fn main() -> i64 { if 2 + 3 == 20 { return 99; } return 5; }");
+    tests.expect(function.has_value(), "constant-CFG fixture lowers to verified IR");
+    if (!function)
+        return;
+
+    const auto optimized = ember::ir::OptimizationPipeline{}.run(*function);
+    tests.expect(optimized.function.has_value(), "constant-CFG optimization re-verifies IR");
+    if (!optimized.function)
+        return;
+
+    const auto unoptimizedCode = ember::jit::x64::BaselineCompiler{}.compile(*function);
+    const auto optimizedCode = ember::jit::x64::BaselineCompiler{}.compile(*optimized.function);
+    tests.expect(unoptimizedCode.code.has_value() && optimizedCode.code.has_value() &&
+                     optimizedCode.code->bytes().size() < unoptimizedCode.code->bytes().size(),
+                 "constant folding, CFG pruning, and DCE reduce finalized baseline code size");
 }
 
 EMBER_TEST("baseline compiler rejects verifier-valid noncanonical preheaders")
