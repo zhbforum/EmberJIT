@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace ember::ir
@@ -60,6 +61,55 @@ struct Instruction
     [[nodiscard]] static Instruction callI64(ValueId result, semantic::FunctionId callee,
                                              std::vector<ValueId> arguments);
 };
+
+// Visits every virtual-register use encoded by one instruction. Shared by
+// optimization analyses and operand rewriting; the overloads intentionally
+// expose mutable references for rewriting and const references for analysis.
+template <typename InstructionType, typename Callback>
+void forEachUseImpl(InstructionType &instruction, Callback &&callback)
+{
+    switch (instruction.opcode)
+    {
+    case Opcode::storeLocal:
+    case Opcode::negateI64:
+        callback(instruction.input);
+        break;
+    case Opcode::addI64:
+    case Opcode::subI64:
+    case Opcode::mulI64:
+    case Opcode::divI64:
+    case Opcode::remI64:
+    case Opcode::equalI64:
+    case Opcode::notEqualI64:
+    case Opcode::lessI64:
+    case Opcode::lessEqualI64:
+    case Opcode::greaterI64:
+    case Opcode::greaterEqualI64:
+        callback(instruction.left);
+        callback(instruction.right);
+        break;
+    case Opcode::callI64:
+        for (auto &argument : instruction.arguments)
+            callback(argument);
+        break;
+    case Opcode::parameter:
+    case Opcode::constantI64:
+    case Opcode::loadLocal:
+        break;
+    }
+}
+
+template <typename Callback>
+void forEachUse(Instruction &instruction, Callback &&callback)
+{
+    forEachUseImpl(instruction, std::forward<Callback>(callback));
+}
+
+template <typename Callback>
+void forEachUse(const Instruction &instruction, Callback &&callback)
+{
+    forEachUseImpl(instruction, std::forward<Callback>(callback));
+}
 
 enum class TerminatorKind : std::uint8_t
 {

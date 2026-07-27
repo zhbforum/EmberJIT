@@ -67,6 +67,7 @@ add_library(ember_ir
     src/ir/verifier.cpp
     src/ir/bytecode_lowerer.cpp
     src/ir/dump.cpp
+    src/ir/optimization.cpp
 )
 target_link_libraries(ember_ir PUBLIC ember_bytecode)
 ember_configure_compile_options(ember_ir)
