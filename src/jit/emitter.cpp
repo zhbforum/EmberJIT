@@ -20,6 +20,17 @@ constexpr auto maximumCodeSize = static_cast<std::size_t>(std::numeric_limits<st
 {
     return static_cast<std::uint8_t>(value);
 }
+
+[[nodiscard]] auto xmmCode(XmmRegister value) noexcept -> std::uint8_t
+{
+    return static_cast<std::uint8_t>(value);
+}
+
+[[nodiscard]] auto xmmModRm(XmmRegister reg, XmmRegister rm) noexcept -> std::uint8_t
+{
+    return static_cast<std::uint8_t>(0xC0U | (static_cast<std::uint32_t>(xmmCode(reg)) << 3U) |
+                                     static_cast<std::uint32_t>(xmmCode(rm)));
+}
 } // namespace
 
 Emitter::Emitter() : identity_(std::make_shared<EmitterIdentity>()) {}
@@ -152,6 +163,16 @@ bool Emitter::multiply(Register destination, Register source)
     return true;
 }
 
+bool Emitter::bitwiseXor(Register destination, Register source)
+{
+    if (!beginInstruction(3))
+        return false;
+    appendRexW(source, destination);
+    appendByte(0x31);
+    appendModRm(source, destination);
+    return true;
+}
+
 bool Emitter::negate(Register value)
 {
     if (!beginInstruction(3))
@@ -281,6 +302,95 @@ bool Emitter::store(Register base, std::int32_t displacement, Register source)
     if ((rm & 0x7U) == 4)
         appendByte(0x24);
     appendUInt32(static_cast<std::uint32_t>(displacement));
+    return true;
+}
+
+bool Emitter::moveToXmm(XmmRegister destination, Register source)
+{
+    if (!beginInstruction(5))
+        return false;
+    const auto destinationCode = xmmCode(destination);
+    if (destinationCode >= 8)
+        return false;
+    appendByte(0x66);
+    appendRexW(Register::rax, source);
+    appendByte(0x0F);
+    appendByte(0x6E);
+    appendByte(static_cast<std::uint8_t>(
+        0xC0U | (static_cast<std::uint32_t>(destinationCode) << 3U) |
+        static_cast<std::uint32_t>(registerCode(source) & 0x7U)));
+    return true;
+}
+
+bool Emitter::moveFromXmm(Register destination, XmmRegister source)
+{
+    if (!beginInstruction(5))
+        return false;
+    const auto sourceCode = xmmCode(source);
+    if (sourceCode >= 8)
+        return false;
+    appendByte(0x66);
+    appendRexW(Register::rax, destination);
+    appendByte(0x0F);
+    appendByte(0x7E);
+    appendByte(static_cast<std::uint8_t>(
+        0xC0U | (static_cast<std::uint32_t>(sourceCode) << 3U) |
+        static_cast<std::uint32_t>(registerCode(destination) & 0x7U)));
+    return true;
+}
+
+bool Emitter::addDouble(XmmRegister destination, XmmRegister source)
+{
+    if (!beginInstruction(4) || xmmCode(destination) >= 8 || xmmCode(source) >= 8)
+        return false;
+    appendByte(0xF2);
+    appendByte(0x0F);
+    appendByte(0x58);
+    appendByte(xmmModRm(destination, source));
+    return true;
+}
+
+bool Emitter::subtractDouble(XmmRegister destination, XmmRegister source)
+{
+    if (!beginInstruction(4) || xmmCode(destination) >= 8 || xmmCode(source) >= 8)
+        return false;
+    appendByte(0xF2);
+    appendByte(0x0F);
+    appendByte(0x5C);
+    appendByte(xmmModRm(destination, source));
+    return true;
+}
+
+bool Emitter::multiplyDouble(XmmRegister destination, XmmRegister source)
+{
+    if (!beginInstruction(4) || xmmCode(destination) >= 8 || xmmCode(source) >= 8)
+        return false;
+    appendByte(0xF2);
+    appendByte(0x0F);
+    appendByte(0x59);
+    appendByte(xmmModRm(destination, source));
+    return true;
+}
+
+bool Emitter::divideDouble(XmmRegister destination, XmmRegister source)
+{
+    if (!beginInstruction(4) || xmmCode(destination) >= 8 || xmmCode(source) >= 8)
+        return false;
+    appendByte(0xF2);
+    appendByte(0x0F);
+    appendByte(0x5E);
+    appendByte(xmmModRm(destination, source));
+    return true;
+}
+
+bool Emitter::compareDouble(XmmRegister left, XmmRegister right)
+{
+    if (!beginInstruction(4) || xmmCode(left) >= 8 || xmmCode(right) >= 8)
+        return false;
+    appendByte(0x66);
+    appendByte(0x0F);
+    appendByte(0x2E);
+    appendByte(xmmModRm(left, right));
     return true;
 }
 
