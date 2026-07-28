@@ -25,9 +25,9 @@ struct LoweringResult
 class Lowerer
 {
   public:
-    // Lowers one verified user function. The first native subset accepts i64
-    // parameters, locals, return values, arithmetic and comparisons; a
-    // comparison bool may only feed a branch.
+    // Lowers one verified user function to the full native v0.1 subset:
+    // i64, f64 and bool values plus void returns. Operand stacks must still
+    // be empty at CFG edges because this non-SSA IR has no edge arguments.
     [[nodiscard]] LoweringResult lower(const bytecode::VerifiedProgram &program,
                                        semantic::FunctionId functionId) const;
 };

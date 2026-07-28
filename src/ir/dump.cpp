@@ -1,5 +1,6 @@
 #include "ember/ir/dump.hpp"
 
+#include <bit>
 #include <sstream>
 #include <string_view>
 
@@ -15,12 +16,18 @@ namespace
         return "param";
     case Opcode::constantI64:
         return "const.i64";
+    case Opcode::constantF64:
+        return "const.f64";
+    case Opcode::constantBool:
+        return "const.bool";
     case Opcode::loadLocal:
         return "load";
     case Opcode::storeLocal:
         return "store";
     case Opcode::negateI64:
         return "neg.i64";
+    case Opcode::negateF64:
+        return "neg.f64";
     case Opcode::addI64:
         return "add.i64";
     case Opcode::subI64:
@@ -43,8 +50,36 @@ namespace
         return "gt.i64";
     case Opcode::greaterEqualI64:
         return "ge.i64";
+    case Opcode::addF64:
+        return "add.f64";
+    case Opcode::subF64:
+        return "sub.f64";
+    case Opcode::mulF64:
+        return "mul.f64";
+    case Opcode::divF64:
+        return "div.f64";
+    case Opcode::equalF64:
+        return "eq.f64";
+    case Opcode::notEqualF64:
+        return "ne.f64";
+    case Opcode::lessF64:
+        return "lt.f64";
+    case Opcode::lessEqualF64:
+        return "le.f64";
+    case Opcode::greaterF64:
+        return "gt.f64";
+    case Opcode::greaterEqualF64:
+        return "ge.f64";
+    case Opcode::equalBool:
+        return "eq.bool";
+    case Opcode::notEqualBool:
+        return "ne.bool";
     case Opcode::callI64:
         return "call.i64";
+    case Opcode::callValue:
+        return "call";
+    case Opcode::callVoid:
+        return "call.void";
     }
     return "<invalid>";
 }
@@ -86,7 +121,14 @@ std::string dump(const VerifiedFunction &verified)
             case Opcode::constantI64:
                 output << ' ' << instruction.constant;
                 break;
+            case Opcode::constantF64:
+                output << ' ' << std::bit_cast<double>(instruction.constant);
+                break;
+            case Opcode::constantBool:
+                output << (instruction.constant == 0 ? " false" : " true");
+                break;
             case Opcode::negateI64:
+            case Opcode::negateF64:
                 output << " v" << instruction.input;
                 break;
             case Opcode::addI64:
@@ -100,9 +142,23 @@ std::string dump(const VerifiedFunction &verified)
             case Opcode::lessEqualI64:
             case Opcode::greaterI64:
             case Opcode::greaterEqualI64:
+            case Opcode::addF64:
+            case Opcode::subF64:
+            case Opcode::mulF64:
+            case Opcode::divF64:
+            case Opcode::equalF64:
+            case Opcode::notEqualF64:
+            case Opcode::lessF64:
+            case Opcode::lessEqualF64:
+            case Opcode::greaterF64:
+            case Opcode::greaterEqualF64:
+            case Opcode::equalBool:
+            case Opcode::notEqualBool:
                 output << " v" << instruction.left << ", v" << instruction.right;
                 break;
             case Opcode::callI64:
+            case Opcode::callValue:
+            case Opcode::callVoid:
                 output << " #" << instruction.callee << "(";
                 for (std::size_t index{}; index < instruction.arguments.size(); ++index)
                 {

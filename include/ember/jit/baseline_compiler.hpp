@@ -34,9 +34,9 @@ struct BaselineCompilerOptions
     bool forceFailureForTesting{};
 };
 
-// Compiles verified, single-body i64 IR to the frame-based baseline ABI. Forms
-// outside the implemented subset return no code so dispatch retains VM
-// execution; publication is therefore always all-or-nothing.
+// Compiles verified v0.1 IR (i64, f64, bool and void) to the frame-based
+// baseline ABI. Forms outside the implemented structural contract return no
+// code so dispatch retains VM execution; publication is all-or-nothing.
 class BaselineCompiler
 {
   public:

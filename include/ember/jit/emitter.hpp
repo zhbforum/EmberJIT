@@ -35,6 +35,12 @@ enum class Register : std::uint8_t
     r15 = 15,
 };
 
+enum class XmmRegister : std::uint8_t
+{
+    xmm0 = 0,
+    xmm1 = 1,
+};
+
 enum class Condition : std::uint8_t
 {
     equal = 0x4,
@@ -43,6 +49,12 @@ enum class Condition : std::uint8_t
     lessEqual = 0xE,
     greater = 0xF,
     greaterEqual = 0xD,
+    below = 0x2,
+    belowEqual = 0x6,
+    above = 0x7,
+    aboveEqual = 0x3,
+    parity = 0xA,
+    notParity = 0xB,
 };
 
 enum class EmitError
@@ -123,6 +135,7 @@ class Emitter
     [[nodiscard]] bool add(Register destination, Register source);
     [[nodiscard]] bool subtract(Register destination, Register source);
     [[nodiscard]] bool multiply(Register destination, Register source);
+    [[nodiscard]] bool bitwiseXor(Register destination, Register source);
     [[nodiscard]] bool negate(Register value);
     [[nodiscard]] bool compare(Register left, Register right);
     [[nodiscard]] bool test(Register left, Register right);
@@ -137,6 +150,13 @@ class Emitter
     [[nodiscard]] bool loadEffectiveAddress(Register destination, Register base,
                                             std::int32_t displacement);
     [[nodiscard]] bool store(Register base, std::int32_t displacement, Register source);
+    [[nodiscard]] bool moveToXmm(XmmRegister destination, Register source);
+    [[nodiscard]] bool moveFromXmm(Register destination, XmmRegister source);
+    [[nodiscard]] bool addDouble(XmmRegister destination, XmmRegister source);
+    [[nodiscard]] bool subtractDouble(XmmRegister destination, XmmRegister source);
+    [[nodiscard]] bool multiplyDouble(XmmRegister destination, XmmRegister source);
+    [[nodiscard]] bool divideDouble(XmmRegister destination, XmmRegister source);
+    [[nodiscard]] bool compareDouble(XmmRegister left, XmmRegister right);
     [[nodiscard]] bool call(Register target);
     // Encodes CQO: sign-extends RAX into the implicit RDX:RAX dividend.
     [[nodiscard]] bool signExtendRaxIntoRdx();

@@ -2,8 +2,10 @@
 #include "ember/bytecode/builtins.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <concepts>
 #include <iomanip>
+#include <iostream>
 #include <queue>
 #include <sstream>
 #include <type_traits>
@@ -12,6 +14,81 @@
 
 namespace ember::bytecode
 {
+void nativePrintI64(std::int64_t value) noexcept
+{
+    std::cout << value << '\n';
+}
+
+void nativePrintF64(double value) noexcept
+{
+    std::cout << value << '\n';
+}
+
+std::int64_t nativeClockMs() noexcept
+{
+    return static_cast<std::int64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+namespace
+{
+[[nodiscard]] bool hasType(const Value &value, semantic::Type type) noexcept
+{
+    return (type == semantic::Type::i64 && std::holds_alternative<std::int64_t>(value)) ||
+           (type == semantic::Type::f64 && std::holds_alternative<double>(value)) ||
+           (type == semantic::Type::boolean && std::holds_alternative<bool>(value));
+}
+} // namespace
+
+BuiltinInvocation invokeBuiltin(const BuiltinDescriptor &builtin, std::span<const Value> arguments) noexcept
+{
+    if (arguments.size() != builtin.signature.parameterTypes.size())
+        return {};
+    for (std::size_t index{}; index < arguments.size(); ++index)
+        if (!hasType(arguments[index], builtin.signature.parameterTypes[index]))
+            return {};
+
+    switch (builtin.kind)
+    {
+    case BuiltinKind::printI64:
+        if (builtin.nativeAbi != NativeBuiltinAbi::i64ToVoid)
+            return {};
+        nativePrintI64(std::get<std::int64_t>(arguments[0]));
+        return {.succeeded = true, .value = std::nullopt};
+    case BuiltinKind::printF64:
+        if (builtin.nativeAbi != NativeBuiltinAbi::f64ToVoid)
+            return {};
+        nativePrintF64(std::get<double>(arguments[0]));
+        return {.succeeded = true, .value = std::nullopt};
+    case BuiltinKind::clockMs:
+        if (builtin.nativeAbi != NativeBuiltinAbi::voidToI64)
+            return {};
+        return {.succeeded = true, .value = Value{nativeClockMs()}};
+    }
+    return {};
+}
+
+std::uintptr_t nativeBuiltinEntry(const BuiltinDescriptor &builtin) noexcept
+{
+    switch (builtin.kind)
+    {
+    case BuiltinKind::printI64:
+        if (builtin.nativeAbi != NativeBuiltinAbi::i64ToVoid)
+            return 0;
+        return reinterpret_cast<std::uintptr_t>(&nativePrintI64);
+    case BuiltinKind::printF64:
+        if (builtin.nativeAbi != NativeBuiltinAbi::f64ToVoid)
+            return 0;
+        return reinterpret_cast<std::uintptr_t>(&nativePrintF64);
+    case BuiltinKind::clockMs:
+        if (builtin.nativeAbi != NativeBuiltinAbi::voidToI64)
+            return 0;
+        return reinterpret_cast<std::uintptr_t>(&nativeClockMs);
+    }
+    return 0;
+}
+
 namespace
 {
 [[nodiscard]] support::Diagnostic error(std::string message)

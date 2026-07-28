@@ -1,11 +1,11 @@
 #include "ember/runtime/vm.hpp"
 
+#include "ember/runtime/native_value.hpp"
+
 #include "ember/support/i64_semantics.hpp"
 
 #include "ember/bytecode/builtins.hpp"
 
-#include <chrono>
-#include <iostream>
 #include <limits>
 #include <new>
 #include <utility>
@@ -96,14 +96,15 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
         -> std::optional<NativeInvocation>
     {
         const auto &bytecode = function->bytecode();
-        std::vector<std::int64_t> locals(bytecode.localCount);
+        std::vector<std::uint64_t> locals(bytecode.localCount);
         for (std::size_t index = 0; index < callArguments.size(); ++index)
         {
-            if (!std::holds_alternative<std::int64_t>(callArguments[index]))
+            const auto word = encodeNativeValueWord(callArguments[index], bytecode.signature.parameterTypes[index]);
+            if (!word)
                 return std::nullopt;
-            locals[index] = std::get<std::int64_t>(callArguments[index]);
+            locals[index] = *word;
         }
-        return function->invokeNativeI64Frame(locals, &state, &VirtualMachine::nativeCallBridge);
+        return function->invokeNativeWordFrame(locals, &state, &VirtualMachine::nativeCallBridge);
     };
 
     const auto initialDispatch = dispatcher.dispatch(entry, arguments);
@@ -122,7 +123,13 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
             return failExecution("R5003", "native call bridge failed");
         if (result->error != NativeFrameError::none)
             return failExecution("R5005", "invalid native execution status");
-        return {.value = result->value, .error = std::nullopt};
+        const auto returnType = initialDispatch->function->bytecode().signature.returnType;
+        if (returnType == semantic::Type::voidType)
+            return {};
+        const auto value = decodeNativeValueWord(result->value, returnType);
+        if (!value)
+            return failExecution("R5005", "invalid native result word");
+        return {.value = *value, .error = std::nullopt};
     }
 
     std::vector<Frame> frames;
@@ -300,7 +307,14 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
                         return failExecution("R5003", "native call bridge failed");
                     if (result->error != NativeFrameError::none)
                         return failExecution("R5005", "invalid native execution status");
-                    stack.push_back(result->value);
+                    const auto returnType = calleeDispatch->function->bytecode().signature.returnType;
+                    if (returnType != semantic::Type::voidType)
+                    {
+                        const auto value = decodeNativeValueWord(result->value, returnType);
+                        if (!value)
+                            return failExecution("R5005", "invalid native result word");
+                        stack.push_back(*value);
+                    }
                     break;
                 }
                 ++state.dynamicFrameCount;
@@ -312,20 +326,14 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
             const auto *builtin = bytecode::findBuiltin(callee->id());
             if (builtin == nullptr)
                 return failExecution("R5003", "unsupported host function");
-            switch (builtin->kind)
+            const auto invocation = bytecode::invokeBuiltin(*builtin, callArguments);
+            if (!invocation.succeeded)
+                return failExecution("R5003", "invalid host invocation");
+            if (builtin->signature.returnType != semantic::Type::voidType)
             {
-            case bytecode::BuiltinKind::printI64:
-                std::cout << std::get<std::int64_t>(callArguments[0]) << '\n';
-                break;
-            case bytecode::BuiltinKind::printF64:
-                std::cout << std::get<double>(callArguments[0]) << '\n';
-                break;
-            case bytecode::BuiltinKind::clockMs:
-                stack.push_back(static_cast<std::int64_t>(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count()));
-                break;
+                if (!invocation.value)
+                    return failExecution("R5003", "host function returned no value");
+                stack.push_back(*invocation.value);
             }
             break;
         }
@@ -360,9 +368,9 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
 }
 
 std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame *caller, std::uint64_t callee,
-                                               const std::int64_t *arguments,
+                                               const std::uint64_t *arguments,
                                                std::uint64_t argumentCount,
-                                               std::int64_t *result) noexcept
+                                               std::uint64_t *result) noexcept
 {
     const auto failBridge = [caller](NativeFrameError error) -> std::uint64_t
     {
@@ -370,7 +378,7 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame *caller, std::ui
             caller->errorCode = static_cast<std::uint64_t>(error);
         return static_cast<std::uint64_t>(error);
     };
-    if (caller == nullptr || caller->callContext == nullptr || result == nullptr ||
+    if (caller == nullptr || caller->callContext == nullptr ||
         callee > std::numeric_limits<semantic::FunctionId>::max() ||
         argumentCount > std::numeric_limits<std::size_t>::max() ||
         (argumentCount != 0 && arguments == nullptr))
@@ -386,8 +394,41 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame *caller, std::ui
     {
         std::vector<bytecode::Value> callArguments;
         callArguments.reserve(static_cast<std::size_t>(argumentCount));
+        const auto *target = state->machine->functions_.find(static_cast<semantic::FunctionId>(callee));
+        if (target == nullptr || target->bytecode().signature.parameterTypes.size() != argumentCount)
+            return failBridge(NativeFrameError::invalidCall);
+        const auto returnType = target->bytecode().signature.returnType;
+        if ((returnType == semantic::Type::voidType && result != nullptr) ||
+            (returnType != semantic::Type::voidType && result == nullptr))
+            return failBridge(NativeFrameError::invalidCall);
         for (std::size_t index{}; index < static_cast<std::size_t>(argumentCount); ++index)
-            callArguments.emplace_back(arguments[index]);
+        {
+            const auto value = decodeNativeValueWord(arguments[index],
+                                                     target->bytecode().signature.parameterTypes[index]);
+            if (!value)
+                return failBridge(NativeFrameError::invalidCall);
+            callArguments.push_back(*value);
+        }
+
+        if (target->bytecode().kind == semantic::FunctionKind::host)
+        {
+            const auto *builtin = bytecode::findBuiltin(target->id());
+            if (builtin == nullptr)
+                return failBridge(NativeFrameError::invalidCall);
+            const auto invocation = bytecode::invokeBuiltin(*builtin, callArguments);
+            if (!invocation.succeeded)
+                return failBridge(NativeFrameError::invalidCall);
+            if (returnType != semantic::Type::voidType)
+            {
+                if (!invocation.value)
+                    return failBridge(NativeFrameError::invalidCall);
+                const auto value = encodeNativeValueWord(*invocation.value, returnType);
+                if (!value)
+                    return failBridge(NativeFrameError::invalidCall);
+                *result = *value;
+            }
+            return static_cast<std::uint64_t>(NativeFrameError::none);
+        }
 
         const bool forceVm = state->nativeBridgeDepth >= maximumNativeBridgeDepth;
         if (!forceVm)
@@ -409,9 +450,14 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame *caller, std::ui
                                                                        : NativeFrameError::invalidCall;
             return failBridge(error);
         }
-        if (!invocation.value || !std::holds_alternative<std::int64_t>(*invocation.value))
+        if (returnType == semantic::Type::voidType)
+            return static_cast<std::uint64_t>(NativeFrameError::none);
+        if (!invocation.value)
             return failBridge(NativeFrameError::invalidCall);
-        *result = std::get<std::int64_t>(*invocation.value);
+        const auto value = encodeNativeValueWord(*invocation.value, returnType);
+        if (!value)
+            return failBridge(NativeFrameError::invalidCall);
+        *result = *value;
         return static_cast<std::uint64_t>(NativeFrameError::none);
     }
     catch (const std::bad_alloc &)

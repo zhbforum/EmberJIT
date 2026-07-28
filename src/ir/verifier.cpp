@@ -1,5 +1,7 @@
 #include "ember/ir/verifier.hpp"
 
+#include "ember/bytecode/bytecode.hpp"
+
 #include <algorithm>
 #include <deque>
 #include <string>
@@ -42,6 +44,24 @@ struct DefinitionLocation
            opcode == Opcode::greaterI64 || opcode == Opcode::greaterEqualI64;
 }
 
+[[nodiscard]] bool isF64Comparison(Opcode opcode) noexcept
+{
+    return opcode == Opcode::equalF64 || opcode == Opcode::notEqualF64 ||
+           opcode == Opcode::lessF64 || opcode == Opcode::lessEqualF64 ||
+           opcode == Opcode::greaterF64 || opcode == Opcode::greaterEqualF64;
+}
+
+[[nodiscard]] bool isF64Binary(Opcode opcode) noexcept
+{
+    return opcode == Opcode::addF64 || opcode == Opcode::subF64 ||
+           opcode == Opcode::mulF64 || opcode == Opcode::divF64 || isF64Comparison(opcode);
+}
+
+[[nodiscard]] bool isBoolBinary(Opcode opcode) noexcept
+{
+    return opcode == Opcode::equalBool || opcode == Opcode::notEqualBool;
+}
+
 [[nodiscard]] bool isBinaryI64(Opcode opcode) noexcept
 {
     return opcode == Opcode::addI64 || opcode == Opcode::subI64 ||
@@ -50,7 +70,23 @@ struct DefinitionLocation
 }
 } // namespace
 
-VerifyResult Verifier::verify(Function function) const
+CallTargetTable CallTargetTable::fromVerifiedProgram(const bytecode::VerifiedProgram &program)
+{
+    std::vector<CallTarget> targets;
+    targets.reserve(program.program().functions.size());
+    for (const auto &function : program.program().functions)
+        targets.push_back(
+            {.id = function.id, .kind = function.kind, .signature = function.signature});
+    return CallTargetTable{std::move(targets)};
+}
+
+const CallTarget *CallTargetTable::find(semantic::FunctionId id) const noexcept
+{
+    const auto found = std::ranges::find(targets_, id, &CallTarget::id);
+    return found == targets_.end() ? nullptr : &*found;
+}
+
+VerifyResult Verifier::verify(Function function, const CallTargetTable &callTargets) const
 {
     std::vector<support::Diagnostic> diagnostics;
     const auto report = [&diagnostics, id = function.id](std::string message)
@@ -102,11 +138,15 @@ VerifyResult Verifier::verify(Function function) const
         definitions[value] = DefinitionLocation{.block = block, .instruction = instruction};
         ++nextValue;
     };
-    const auto canonicalNoValues = [](const Instruction &instruction)
+    const auto hasNoCallOperands = [](const Instruction &instruction)
+    {
+        return instruction.callee == noFunction &&
+               instruction.calleeKind == semantic::FunctionKind::user && instruction.arguments.empty();
+    };
+    const auto canonicalNoValues = [&hasNoCallOperands](const Instruction &instruction)
     {
         return instruction.input == noValue && instruction.left == noValue &&
-               instruction.right == noValue && instruction.callee == noFunction &&
-               instruction.arguments.empty();
+               instruction.right == noValue && hasNoCallOperands(instruction);
     };
 
     // Phase 1: all blocks receive full structural validation before any
@@ -137,6 +177,19 @@ VerifyResult Verifier::verify(Function function) const
                 define(instruction.result, semantic::Type::i64, block.id, index, "constant");
                 parameterPrefix = false;
                 break;
+            case Opcode::constantF64:
+                if (!canonicalNoValues(instruction) || instruction.local != noLocal)
+                    report("constant has non-canonical unused operands");
+                define(instruction.result, semantic::Type::f64, block.id, index, "constant");
+                parameterPrefix = false;
+                break;
+            case Opcode::constantBool:
+                if (!canonicalNoValues(instruction) || instruction.local != noLocal ||
+                    (instruction.constant != 0 && instruction.constant != 1))
+                    report("boolean constant has a non-canonical encoding");
+                define(instruction.result, semantic::Type::boolean, block.id, index, "constant");
+                parameterPrefix = false;
+                break;
             case Opcode::loadLocal:
                 if (!canonicalNoValues(instruction) || instruction.local >= function.localTypes.size() ||
                     instruction.constant != 0)
@@ -151,25 +204,59 @@ VerifyResult Verifier::verify(Function function) const
             case Opcode::storeLocal:
                 if (instruction.result != noValue || instruction.left != noValue ||
                     instruction.right != noValue || instruction.local >= function.localTypes.size() ||
-                    instruction.constant != 0 || instruction.callee != noFunction ||
-                    !instruction.arguments.empty())
+                    instruction.constant != 0 || !hasNoCallOperands(instruction))
                     report("store has a non-canonical encoding or invalid local");
                 parameterPrefix = false;
                 break;
             case Opcode::negateI64:
                 if (instruction.left != noValue || instruction.right != noValue ||
                     instruction.local != noLocal || instruction.constant != 0 ||
-                    instruction.callee != noFunction || !instruction.arguments.empty())
+                    !hasNoCallOperands(instruction))
                     report("negation has non-canonical unused operands");
                 define(instruction.result, semantic::Type::i64, block.id, index, "negation");
+                parameterPrefix = false;
+                break;
+            case Opcode::negateF64:
+                if (instruction.left != noValue || instruction.right != noValue ||
+                    instruction.local != noLocal || instruction.constant != 0 ||
+                    !hasNoCallOperands(instruction))
+                    report("negation has non-canonical unused operands");
+                define(instruction.result, semantic::Type::f64, block.id, index, "negation");
                 parameterPrefix = false;
                 break;
             case Opcode::callI64:
                 if (instruction.input != noValue || instruction.left != noValue ||
                     instruction.right != noValue || instruction.local != noLocal ||
-                    instruction.constant != 0 || instruction.callee == noFunction)
+                    instruction.constant != 0 || instruction.callee == noFunction ||
+                    (instruction.calleeKind != semantic::FunctionKind::user &&
+                     instruction.calleeKind != semantic::FunctionKind::host))
                     report("call has a non-canonical encoding");
                 define(instruction.result, semantic::Type::i64, block.id, index, "call");
+                parameterPrefix = false;
+                break;
+            case Opcode::callValue:
+                if (instruction.input != noValue || instruction.left != noValue ||
+                    instruction.right != noValue || instruction.local != noLocal ||
+                    instruction.constant != 0 || instruction.callee == noFunction ||
+                    (instruction.calleeKind != semantic::FunctionKind::user &&
+                     instruction.calleeKind != semantic::FunctionKind::host))
+                    report("call has a non-canonical encoding");
+                if (instruction.result == noValue || instruction.result >= function.valueTypes.size() ||
+                    function.valueTypes[instruction.result] == semantic::Type::voidType)
+                    report("value call must define a non-void virtual register");
+                else
+                    define(instruction.result, function.valueTypes[instruction.result], block.id, index,
+                           "call");
+                parameterPrefix = false;
+                break;
+            case Opcode::callVoid:
+                if (instruction.result != noValue || instruction.input != noValue ||
+                    instruction.left != noValue || instruction.right != noValue ||
+                    instruction.local != noLocal || instruction.constant != 0 ||
+                    instruction.callee == noFunction ||
+                    (instruction.calleeKind != semantic::FunctionKind::user &&
+                     instruction.calleeKind != semantic::FunctionKind::host))
+                    report("void call has a non-canonical encoding");
                 parameterPrefix = false;
                 break;
             case Opcode::addI64:
@@ -184,11 +271,32 @@ VerifyResult Verifier::verify(Function function) const
             case Opcode::greaterI64:
             case Opcode::greaterEqualI64:
                 if (instruction.input != noValue || instruction.local != noLocal ||
-                    instruction.constant != 0 || instruction.callee != noFunction ||
-                    !instruction.arguments.empty())
+                    instruction.constant != 0 || !hasNoCallOperands(instruction))
                     report("binary instruction has non-canonical unused operands");
                 define(instruction.result, isComparison(instruction.opcode) ? semantic::Type::boolean
                                                                             : semantic::Type::i64,
+                       block.id, index, "binary instruction");
+                parameterPrefix = false;
+                break;
+            case Opcode::addF64:
+            case Opcode::subF64:
+            case Opcode::mulF64:
+            case Opcode::divF64:
+            case Opcode::equalF64:
+            case Opcode::notEqualF64:
+            case Opcode::lessF64:
+            case Opcode::lessEqualF64:
+            case Opcode::greaterF64:
+            case Opcode::greaterEqualF64:
+            case Opcode::equalBool:
+            case Opcode::notEqualBool:
+                if (instruction.input != noValue || instruction.local != noLocal ||
+                    instruction.constant != 0 || !hasNoCallOperands(instruction))
+                    report("binary instruction has non-canonical unused operands");
+                define(instruction.result,
+                       isF64Comparison(instruction.opcode) || isBoolBinary(instruction.opcode)
+                           ? semantic::Type::boolean
+                           : semantic::Type::f64,
                        block.id, index, "binary instruction");
                 parameterPrefix = false;
                 break;
@@ -316,15 +424,67 @@ VerifyResult Verifier::verify(Function function) const
                             "store");
             else if (instruction.opcode == Opcode::negateI64)
                 validateUse(instruction.input, semantic::Type::i64, block.id, index, "negation");
-            else if (instruction.opcode == Opcode::callI64)
+            else if (instruction.opcode == Opcode::negateF64)
+                validateUse(instruction.input, semantic::Type::f64, block.id, index, "negation");
+            else if (instruction.opcode == Opcode::callI64 || instruction.opcode == Opcode::callValue ||
+                     instruction.opcode == Opcode::callVoid)
             {
-                for (const auto argument : instruction.arguments)
-                    validateUse(argument, semantic::Type::i64, block.id, index, "call argument");
+                const auto *target = callTargets.find(instruction.callee);
+                if (target == nullptr)
+                {
+                    report("call target is absent from the trusted target table");
+                    continue;
+                }
+                if (target->kind != instruction.calleeKind)
+                    report("call kind does not match the trusted target");
+                if (instruction.arguments.size() != target->signature.parameterTypes.size())
+                    report("call argument count does not match the trusted target signature");
+
+                const auto checkedArgumentCount =
+                    std::min(instruction.arguments.size(), target->signature.parameterTypes.size());
+                for (std::size_t argumentIndex{}; argumentIndex < checkedArgumentCount; ++argumentIndex)
+                    validateUse(instruction.arguments[argumentIndex],
+                                target->signature.parameterTypes[argumentIndex], block.id, index,
+                                "call argument");
+
+                if (instruction.opcode == Opcode::callVoid)
+                {
+                    if (target->signature.returnType != semantic::Type::voidType)
+                        report("void call targets a non-void function");
+                    continue;
+                }
+
+                if (target->signature.returnType == semantic::Type::voidType)
+                    report("value call targets a void function");
+                if (instruction.result == noValue || instruction.result >= function.valueTypes.size() ||
+                    function.valueTypes[instruction.result] != target->signature.returnType)
+                    report("call result type does not match the trusted target signature");
+                if (instruction.opcode == Opcode::callI64)
+                {
+                    if (target->signature.returnType != semantic::Type::i64)
+                        report("call_i64 targets a non-i64 function");
+                    if (!std::ranges::all_of(target->signature.parameterTypes,
+                                             [](semantic::Type type)
+                                             { return type == semantic::Type::i64; }))
+                        report("call_i64 target has a non-i64 parameter");
+                }
             }
             else if (isBinaryI64(instruction.opcode))
             {
                 validateUse(instruction.left, semantic::Type::i64, block.id, index, "binary instruction");
                 validateUse(instruction.right, semantic::Type::i64, block.id, index, "binary instruction");
+            }
+            else if (isF64Binary(instruction.opcode))
+            {
+                validateUse(instruction.left, semantic::Type::f64, block.id, index, "binary instruction");
+                validateUse(instruction.right, semantic::Type::f64, block.id, index, "binary instruction");
+            }
+            else if (isBoolBinary(instruction.opcode))
+            {
+                validateUse(instruction.left, semantic::Type::boolean, block.id, index,
+                            "binary instruction");
+                validateUse(instruction.right, semantic::Type::boolean, block.id, index,
+                            "binary instruction");
             }
         }
         const auto terminatorIndex = block.instructions.size();
@@ -387,6 +547,11 @@ VerifyResult Verifier::verify(Function function) const
     }
     if (!diagnostics.empty())
         return {.function = std::nullopt, .diagnostics = std::move(diagnostics)};
-    return {.function = VerifiedFunction{std::move(function)}, .diagnostics = {}};
+    return {.function = VerifiedFunction{std::move(function), callTargets}, .diagnostics = {}};
+}
+
+VerifyResult Verifier::verify(Function function) const
+{
+    return verify(std::move(function), CallTargetTable{{}});
 }
 } // namespace ember::ir

@@ -38,14 +38,16 @@ class NativeCodeHandle
     // correctness remain the trusted lowering/emitter boundary.
     [[nodiscard]] static NativeCodeCreateResult
     publishI64Binary(jit::x64::MachineCode machineCode) noexcept;
-    // `machineCode` must implement Win64 i64(NativeFrame*). This is the
+    // `machineCode` must implement Win64 u64(NativeFrame*). This is the
     // extensible baseline entry ABI; callers retain ownership of frame locals.
     [[nodiscard]] static NativeCodeCreateResult
-    publishI64Frame(jit::x64::MachineCode machineCode) noexcept;
+    publishWordFrame(jit::x64::MachineCode machineCode) noexcept;
     [[nodiscard]] bool valid() const noexcept { return code_.size() != 0; }
     // Requires valid(); debug builds assert this precondition.
     [[nodiscard]] std::int64_t invokeI64Binary(std::int64_t left, std::int64_t right) const;
     // Requires valid(); debug builds assert this precondition.
+    [[nodiscard]] std::uint64_t invokeWordFrame(NativeFrame &frame) const;
+    // Compatibility adapter for the i64-only bootstrap tests and callers.
     [[nodiscard]] std::int64_t invokeI64Frame(NativeFrame &frame) const;
     [[nodiscard]] std::size_t codeSize() const noexcept { return code_.size(); }
 
