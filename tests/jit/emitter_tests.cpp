@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -357,6 +358,56 @@ EMBER_TEST("native code handle executes both generated branch paths")
                  "generated branch handles equality");
 }
 
+EMBER_TEST("native code handle executes ordered SSE2 f64 comparisons")
+{
+    ember::jit::x64::Emitter emitter;
+    tests.expect(emitter.moveToXmm(ember::jit::x64::XmmRegister::xmm0,
+                                   ember::jit::x64::Register::rcx) &&
+                     emitter.moveToXmm(ember::jit::x64::XmmRegister::xmm1,
+                                       ember::jit::x64::Register::rdx) &&
+                     emitter.compareDouble(ember::jit::x64::XmmRegister::xmm0,
+                                           ember::jit::x64::XmmRegister::xmm1) &&
+                     emitter.moveImmediate64(ember::jit::x64::Register::rax, 0) &&
+                     emitter.set(ember::jit::x64::Condition::below,
+                                 ember::jit::x64::Register::rax) &&
+                     emitter.returnFromFunction(),
+                 "SSE2 comparison instructions encode");
+    auto emitted = emitter.finalize();
+    tests.expect(emitted.code.has_value(), "SSE2 comparison code finalizes");
+    if (!emitted.code)
+        return;
+    auto native = ember::runtime::NativeCodeHandle::publishI64Binary(std::move(*emitted.code));
+    tests.expect(native.handle.has_value(), "SSE2 comparison code is published");
+    if (!native.handle)
+        return;
+    const auto negative = std::bit_cast<std::int64_t>(-2.5);
+    const auto zero = std::bit_cast<std::int64_t>(0.0);
+    tests.expect(native.handle->invokeI64Binary(negative, zero) == 1,
+                 "UCOMISD plus SETB recognises an ordered less-than relation");
+}
+
+EMBER_TEST("native code handle preserves f64 bits through XMM MOVQ")
+{
+    ember::jit::x64::Emitter emitter;
+    tests.expect(emitter.moveToXmm(ember::jit::x64::XmmRegister::xmm0,
+                                   ember::jit::x64::Register::rcx) &&
+                     emitter.moveFromXmm(ember::jit::x64::Register::rax,
+                                         ember::jit::x64::XmmRegister::xmm0) &&
+                     emitter.returnFromFunction(),
+                 "XMM MOVQ instructions encode");
+    auto emitted = emitter.finalize();
+    tests.expect(emitted.code.has_value(), "XMM MOVQ code finalizes");
+    if (!emitted.code)
+        return;
+    auto native = ember::runtime::NativeCodeHandle::publishI64Binary(std::move(*emitted.code));
+    tests.expect(native.handle.has_value(), "XMM MOVQ code is published");
+    if (!native.handle)
+        return;
+    const auto input = std::bit_cast<std::int64_t>(-2.5);
+    tests.expect(native.handle->invokeI64Binary(input, 0) == input,
+                 "MOVQ preserves the f64 bit pattern across the XMM boundary");
+}
+
 EMBER_TEST("native frame adapter executes generated local-slot access")
 {
     ember::jit::x64::Emitter emitter;
@@ -368,11 +419,11 @@ EMBER_TEST("native frame adapter executes generated local-slot access")
     tests.expect(emitted.code.has_value(), "native frame access finalizes");
     if (!emitted.code)
         return;
-    auto native = ember::runtime::NativeCodeHandle::publishI64Frame(std::move(*emitted.code));
+    auto native = ember::runtime::NativeCodeHandle::publishWordFrame(std::move(*emitted.code));
     tests.expect(native.handle.has_value(), "native frame code is published");
     if (!native.handle)
         return;
-    std::vector<std::int64_t> locals{73};
+    std::vector<std::uint64_t> locals{73U};
     ember::runtime::NativeFrame frame{.locals = locals.data(), .localCount = locals.size()};
     tests.expect(native.handle->invokeI64Frame(frame) == 73,
                  "native frame adapter returns the requested local slot");

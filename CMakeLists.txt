@@ -85,6 +85,7 @@ add_library(ember_runtime
     src/runtime/runtime_function.cpp
     src/runtime/runtime_function_table.cpp
     src/runtime/native_code.cpp
+    src/runtime/native_value.cpp
     src/runtime/vm.cpp
 )
 target_link_libraries(ember_runtime PUBLIC ember_bytecode ember_ir ember_jit)
@@ -150,6 +151,11 @@ if(BUILD_TESTING)
     )
 
     set(
+        ember_native_v01_types_fixture
+        "${ember_fixture_directory}/native_v01_types.ember"
+    )
+
+    set(
         ember_invalid_main_signature_fixture
         "${ember_fixture_directory}/invalid_main_signature.ember"
     )
@@ -172,6 +178,11 @@ if(BUILD_TESTING)
     set(
         ember_vm_runtime_expected_output
         "${ember_fixture_directory}/vm_runtime.expected"
+    )
+
+    set(
+        ember_native_v01_types_expected_output
+        "${ember_fixture_directory}/native_v01_types.expected"
     )
 
     set(
@@ -302,6 +313,16 @@ if(BUILD_TESTING)
             -DSOURCE_FILE=${ember_vm_runtime_fixture}
             -DEXPECTED_OUTPUT_FILE=${ember_vm_runtime_expected_output}
             -P ${ember_test_script_directory}/assert_run_vm_output.cmake
+    )
+
+    add_test(
+        NAME ember_run_jit_native_v01_types
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_native_v01_types_fixture}
+            -DEXPECTED_OUTPUT_FILE=${ember_native_v01_types_expected_output}
+            -DJIT_THRESHOLD=1
+            -P ${ember_test_script_directory}/assert_run_jit_output.cmake
     )
 
     add_test(

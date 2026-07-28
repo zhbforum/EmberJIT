@@ -51,7 +51,7 @@ bool RuntimeFunction::compileBaselineNative(bool forceFailureForTesting,
                         .compile(*lowered.function);
     if (!compiled.code)
         return false;
-    auto published = NativeCodeHandle::publishI64Frame(std::move(*compiled.code));
+    auto published = NativeCodeHandle::publishWordFrame(std::move(*compiled.code));
     if (!published.handle)
         return false;
 
@@ -63,12 +63,12 @@ bool RuntimeFunction::compileBaselineNative(bool forceFailureForTesting,
     return true;
 }
 
-NativeInvocation RuntimeFunction::invokeNativeI64Frame(std::vector<std::int64_t> &locals,
-                                                        void *callContext,
-                                                        jit::NativeCallBridge callBridge) const
+NativeInvocation RuntimeFunction::invokeNativeWordFrame(std::vector<std::uint64_t> &locals,
+                                                         void *callContext,
+                                                         jit::NativeCallBridge callBridge) const
 {
-    std::vector<std::int64_t> spills(nativeFrameRequirements_.spillCount);
-    std::vector<std::int64_t> callArguments(nativeFrameRequirements_.callArgumentCapacity);
+    std::vector<std::uint64_t> spills(nativeFrameRequirements_.spillCount);
+    std::vector<std::uint64_t> callArguments(nativeFrameRequirements_.callArgumentCapacity);
     NativeFrame frame{.locals = locals.data(),
                       .localCount = locals.size(),
                       .spills = spills.data(),
@@ -77,7 +77,7 @@ NativeInvocation RuntimeFunction::invokeNativeI64Frame(std::vector<std::int64_t>
                       .callArgumentCapacity = callArguments.size(),
                       .callContext = callContext,
                       .callBridge = callBridge};
-    return {.value = nativeCode_->invokeI64Frame(frame),
+    return {.value = nativeCode_->invokeWordFrame(frame),
             .error = static_cast<NativeFrameError>(frame.errorCode)};
 }
 } // namespace ember::runtime

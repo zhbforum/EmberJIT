@@ -1,6 +1,7 @@
 #include "ember/runtime/native_code.hpp"
 
 #include <cassert>
+#include <bit>
 #include <utility>
 
 namespace ember::runtime
@@ -15,7 +16,7 @@ NativeCodeHandle::publishI64Binary(jit::x64::MachineCode machineCode) noexcept
 }
 
 NativeCodeCreateResult
-NativeCodeHandle::publishI64Frame(jit::x64::MachineCode machineCode) noexcept
+NativeCodeHandle::publishWordFrame(jit::x64::MachineCode machineCode) noexcept
 {
     auto code = jit::CodeBuffer::create(machineCode.bytes());
     if (!code.buffer)
@@ -34,12 +35,17 @@ std::int64_t NativeCodeHandle::invokeI64Binary(std::int64_t left, std::int64_t r
     return function(left, right);
 }
 
-std::int64_t NativeCodeHandle::invokeI64Frame(NativeFrame &frame) const
+std::uint64_t NativeCodeHandle::invokeWordFrame(NativeFrame &frame) const
 {
     assert(valid());
     assert(frame.localCount == 0 || frame.locals != nullptr);
-    using EntryPoint = std::int64_t (*)(NativeFrame *);
+    using EntryPoint = std::uint64_t (*)(NativeFrame *);
     const auto function = reinterpret_cast<EntryPoint>(entryAddress());
     return function(&frame);
+}
+
+std::int64_t NativeCodeHandle::invokeI64Frame(NativeFrame &frame) const
+{
+    return std::bit_cast<std::int64_t>(invokeWordFrame(frame));
 }
 } // namespace ember::runtime

@@ -23,7 +23,7 @@ enum class ExecutionTier
 // then, its incompleteness prevents callers from constructing a fake target.
 struct NativeInvocation
 {
-    std::int64_t value{};
+    std::uint64_t value{};
     NativeFrameError error{NativeFrameError::none};
 };
 
@@ -54,9 +54,9 @@ class RuntimeFunction
     [[nodiscard]] ExecutionTier selectExecutionTier(bool jitEnabled) const noexcept;
     [[nodiscard]] bool compileBaselineNative(bool forceFailureForTesting = false,
                                              bool disableOptimizationForTesting = false);
-    [[nodiscard]] NativeInvocation invokeNativeI64Frame(std::vector<std::int64_t> &locals,
-                                                         void *callContext,
-                                                         jit::NativeCallBridge callBridge) const;
+    [[nodiscard]] NativeInvocation invokeNativeWordFrame(std::vector<std::uint64_t> &locals,
+                                                          void *callContext,
+                                                          jit::NativeCallBridge callBridge) const;
 
     bytecode::Function bytecode_;
     ExecutionTier tier_{ExecutionTier::virtualMachine};

@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -45,24 +46,27 @@ struct BridgeProbe
     bool called{};
     bool stackAligned{};
     bool argumentsValid{};
+    bool expectsVoidResult{};
     bool failCall{};
 };
 
 std::uint64_t probeBridge(ember::jit::NativeFrame *caller, std::uint64_t callee,
-                          const std::int64_t *arguments, std::uint64_t argumentCount,
-                          std::int64_t *result)
+                          const std::uint64_t *arguments, std::uint64_t argumentCount,
+                          std::uint64_t *result)
 {
     auto *probe = static_cast<BridgeProbe *>(caller->callContext);
     probe->called = true;
     probe->stackAligned = (reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress()) & 0xFU) == 8U;
     probe->argumentsValid = callee == 1 && argumentCount == 1 && arguments != nullptr &&
-                            arguments[0] == 41 && result != nullptr;
+                            arguments[0] == 41U &&
+                            (probe->expectsVoidResult ? result == nullptr : result != nullptr);
     if (probe->failCall)
     {
         caller->errorCode = static_cast<std::uint64_t>(ember::jit::NativeFrameError::invalidCall);
         return static_cast<std::uint64_t>(ember::jit::NativeFrameError::invalidCall);
     }
-    *result = 42;
+    if (!probe->expectsVoidResult)
+        *result = 42U;
     return static_cast<std::uint64_t>(ember::jit::NativeFrameError::none);
 }
 
@@ -144,12 +148,12 @@ EMBER_TEST("baseline compiler executes frame-based i64 arithmetic")
         return;
 
 #if EMBER_HAS_WIN64_JIT
-    std::vector<std::int64_t> spills(compiled.frameRequirements.spillCount);
-    auto native = ember::runtime::NativeCodeHandle::publishI64Frame(std::move(*compiled.code));
+    std::vector<std::uint64_t> spills(compiled.frameRequirements.spillCount);
+    auto native = ember::runtime::NativeCodeHandle::publishWordFrame(std::move(*compiled.code));
     tests.expect(native.handle.has_value(), "baseline machine code is publishable on Win64");
     if (native.handle)
     {
-        std::vector<std::int64_t> locals{-17, 25};
+        std::vector<std::uint64_t> locals{std::bit_cast<std::uint64_t>(std::int64_t{-17}), 25U};
         ember::runtime::NativeFrame frame{.locals = locals.data(),
                                           .localCount = locals.size(),
                                           .spills = spills.data(),
@@ -191,12 +195,12 @@ EMBER_TEST("baseline compiler supports flexible frame parameters and guarded div
 #if EMBER_HAS_WIN64_JIT
     if (remainderCode.code)
     {
-        std::vector<std::int64_t> spills(remainderCode.frameRequirements.spillCount);
-        auto native = ember::runtime::NativeCodeHandle::publishI64Frame(std::move(*remainderCode.code));
+        std::vector<std::uint64_t> spills(remainderCode.frameRequirements.spillCount);
+        auto native = ember::runtime::NativeCodeHandle::publishWordFrame(std::move(*remainderCode.code));
         tests.expect(native.handle.has_value(), "guarded remainder machine code is publishable");
         if (native.handle)
         {
-            std::vector<std::int64_t> locals{-17, 5};
+            std::vector<std::uint64_t> locals{std::bit_cast<std::uint64_t>(std::int64_t{-17}), 5U};
             ember::runtime::NativeFrame frame{.locals = locals.data(),
                                               .localCount = locals.size(),
                                               .spills = spills.data(),
@@ -279,7 +283,7 @@ EMBER_TEST("baseline compiler uses a fixed aligned Win64 call frame")
                  "native prologue saves RBX/R12-R14 and reserves exactly 40 aligned call-area bytes");
     tests.expect(compiled.frameRequirements.spillCount == function->function().valueTypes.size() &&
                      compiled.frameRequirements.callArgumentCapacity == 0,
-                 "SSA spill requirements are declared for runtime-owned frame storage");
+                 "runtime-owned spills contain only materialized virtual-register values");
 }
 
 EMBER_TEST("baseline ABI preserves nonvolatile registers across bridge and error paths")
@@ -290,14 +294,14 @@ EMBER_TEST("baseline ABI preserves nonvolatile registers across bridge and error
     {
         if (!compiled.code)
             return false;
-        auto target = ember::runtime::NativeCodeHandle::publishI64Frame(std::move(*compiled.code));
+        auto target = ember::runtime::NativeCodeHandle::publishWordFrame(std::move(*compiled.code));
         if (!target.handle)
             return false;
         auto callerCode = makeCanaryCaller(
             ember::runtime::test::NativeCodeHandleAccess::entryAddress(*target.handle));
         if (!callerCode)
             return false;
-        auto caller = ember::runtime::NativeCodeHandle::publishI64Frame(std::move(*callerCode));
+        auto caller = ember::runtime::NativeCodeHandle::publishWordFrame(std::move(*callerCode));
         return caller.handle && caller.handle->invokeI64Frame(frame) == 1;
     };
 
@@ -307,8 +311,8 @@ EMBER_TEST("baseline ABI preserves nonvolatile registers across bridge and error
     if (!caller)
         return;
     auto bridgeCode = ember::jit::x64::BaselineCompiler{}.compile(*caller);
-    std::vector<std::int64_t> bridgeSpills(bridgeCode.frameRequirements.spillCount);
-    std::vector<std::int64_t> bridgeArguments(bridgeCode.frameRequirements.callArgumentCapacity);
+    std::vector<std::uint64_t> bridgeSpills(bridgeCode.frameRequirements.spillCount);
+    std::vector<std::uint64_t> bridgeArguments(bridgeCode.frameRequirements.callArgumentCapacity);
     BridgeProbe normalProbe;
     ember::jit::NativeFrame normalFrame{.spills = bridgeSpills.data(),
                                         .spillCount = bridgeSpills.size(),
@@ -320,6 +324,25 @@ EMBER_TEST("baseline ABI preserves nonvolatile registers across bridge and error
                      normalProbe.stackAligned && normalProbe.argumentsValid && normalFrame.errorCode == 0,
                  "bridge call has aligned RSP, uses the fifth argument, and preserves RBX/R12-R14");
 
+    auto voidCaller = lower("fn caller() -> i64 { sink(41); return 42; } "
+                            "fn sink(value: i64) -> void { return; }");
+    tests.expect(voidCaller.has_value(), "void bridge ABI fixture lowers to verified IR");
+    if (!voidCaller)
+        return;
+    auto voidBridgeCode = ember::jit::x64::BaselineCompiler{}.compile(*voidCaller);
+    std::vector<std::uint64_t> voidSpills(voidBridgeCode.frameRequirements.spillCount);
+    std::vector<std::uint64_t> voidArguments(voidBridgeCode.frameRequirements.callArgumentCapacity);
+    BridgeProbe voidProbe{.expectsVoidResult = true};
+    ember::jit::NativeFrame voidFrame{.spills = voidSpills.data(),
+                                      .spillCount = voidSpills.size(),
+                                      .callArguments = voidArguments.data(),
+                                      .callArgumentCapacity = voidArguments.size(),
+                                      .callContext = &voidProbe,
+                                      .callBridge = &probeBridge};
+    tests.expect(runUnderCanaryCaller(std::move(voidBridgeCode), voidFrame) && voidProbe.called &&
+                     voidProbe.stackAligned && voidProbe.argumentsValid && voidFrame.errorCode == 0,
+                 "void bridge calls pass nullptr as the fifth argument and materialize no result word");
+
     auto callFailure = lower("fn caller() -> i64 { return callee(41); } "
                              "fn callee(value: i64) -> i64 { return value; }");
     if (!callFailure)
@@ -328,8 +351,8 @@ EMBER_TEST("baseline ABI preserves nonvolatile registers across bridge and error
         return;
     }
     auto callFailureCode = ember::jit::x64::BaselineCompiler{}.compile(*callFailure);
-    std::vector<std::int64_t> callFailureSpills(callFailureCode.frameRequirements.spillCount);
-    std::vector<std::int64_t> callFailureArguments(callFailureCode.frameRequirements.callArgumentCapacity);
+    std::vector<std::uint64_t> callFailureSpills(callFailureCode.frameRequirements.spillCount);
+    std::vector<std::uint64_t> callFailureArguments(callFailureCode.frameRequirements.callArgumentCapacity);
     BridgeProbe failureProbe{.failCall = true};
     ember::jit::NativeFrame failureFrame{.spills = callFailureSpills.data(),
                                          .spillCount = callFailureSpills.size(),
@@ -350,8 +373,10 @@ EMBER_TEST("baseline ABI preserves nonvolatile registers across bridge and error
         return;
     }
     auto divisionCode = ember::jit::x64::BaselineCompiler{}.compile(*division);
-    std::vector<std::int64_t> divisionLocals{std::numeric_limits<std::int64_t>::min(), -1};
-    std::vector<std::int64_t> divisionSpills(divisionCode.frameRequirements.spillCount);
+    std::vector<std::uint64_t> divisionLocals{
+        std::bit_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::min()),
+        std::bit_cast<std::uint64_t>(std::int64_t{-1})};
+    std::vector<std::uint64_t> divisionSpills(divisionCode.frameRequirements.spillCount);
     ember::jit::NativeFrame divisionFrame{.locals = divisionLocals.data(),
                                           .localCount = divisionLocals.size(),
                                           .spills = divisionSpills.data(),

@@ -57,9 +57,9 @@ class VirtualMachine
                                                   NativeCallState &state, bool forceVm = false);
     [[nodiscard]] static std::uint64_t nativeCallBridge(jit::NativeFrame *caller,
                                                          std::uint64_t callee,
-                                                         const std::int64_t *arguments,
+                                                         const std::uint64_t *arguments,
                                                          std::uint64_t argumentCount,
-                                                         std::int64_t *result) noexcept;
+                                                         std::uint64_t *result) noexcept;
 
     RuntimeOptions options_;
     RuntimeFunctionTable functions_;
