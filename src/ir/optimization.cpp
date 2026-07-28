@@ -154,9 +154,9 @@ void remapUse(ValueId &value, const std::vector<ValueId> &newIds)
     return function;
 }
 
-[[nodiscard]] VerifyResult verify(Function function)
+[[nodiscard]] VerifyResult verify(Function function, const CallTargetTable &callTargets)
 {
-    return Verifier{}.verify(std::move(function));
+    return Verifier{}.verify(std::move(function), callTargets);
 }
 
 [[nodiscard]] OptimizationResult failed(OptimizationPass pass, VerifyResult result)
@@ -202,7 +202,7 @@ VerifyResult ConstantFoldingPass::run(const VerifiedFunction &input) const
                 instruction = Instruction::constantI64(instruction.result, *facts.i64[instruction.result]);
         }
     }
-    return verify(std::move(function));
+    return verify(std::move(function), input.callTargets());
 }
 
 VerifyResult ConstantPropagationPass::run(const VerifiedFunction &input) const
@@ -245,7 +245,7 @@ VerifyResult ConstantPropagationPass::run(const VerifiedFunction &input) const
             }
         }
     }
-    return verify(std::move(function));
+    return verify(std::move(function), input.callTargets());
 }
 
 auto CfgSimplificationPass::run(const VerifiedFunction &input) const -> VerifyResult
@@ -317,7 +317,7 @@ auto CfgSimplificationPass::run(const VerifiedFunction &input) const -> VerifyRe
         }
     }
     function.blocks = std::move(blocks);
-    return verify(compactValues(std::move(function)));
+    return verify(compactValues(std::move(function)), input.callTargets());
 }
 
 VerifyResult DeadCodeEliminationPass::run(const VerifiedFunction &input) const
@@ -351,7 +351,7 @@ VerifyResult DeadCodeEliminationPass::run(const VerifiedFunction &input) const
         std::ranges::reverse(kept);
         block.instructions = std::move(kept);
     }
-    return verify(compactValues(std::move(function)));
+    return verify(compactValues(std::move(function)), input.callTargets());
 }
 
 OptimizationResult OptimizationPipeline::run(const VerifiedFunction &input) const

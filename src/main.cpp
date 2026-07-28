@@ -307,7 +307,7 @@ void printOptimizationFailure(const ember::ir::OptimizationResult &result)
             continue;
         }
         const auto message = lowered.result.diagnostics.empty()
-                                 ? "unsupported native i64 form"
+                                 ? "unsupported native form"
                                  : lowered.result.diagnostics.front().message;
         std::cout << "fn #" << lowered.id << ": not lowered (" << message << ")\n";
     }

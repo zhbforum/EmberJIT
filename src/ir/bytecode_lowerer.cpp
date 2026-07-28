@@ -31,13 +31,6 @@ namespace
            std::move(message);
 }
 
-[[nodiscard]] bool isI64SubsetSignature(const semantic::FunctionSignature &signature)
-{
-    return signature.returnType == semantic::Type::i64 &&
-           std::ranges::all_of(signature.parameterTypes,
-                               [](semantic::Type type) { return type == semantic::Type::i64; });
-}
-
 [[nodiscard]] std::optional<Opcode> lowerOpcode(bytecode::Opcode opcode)
 {
     using BytecodeOpcode = bytecode::Opcode;
@@ -45,6 +38,8 @@ namespace
     {
     case BytecodeOpcode::negateI64:
         return Opcode::negateI64;
+    case BytecodeOpcode::negateF64:
+        return Opcode::negateF64;
     case BytecodeOpcode::addI64:
         return Opcode::addI64;
     case BytecodeOpcode::subI64:
@@ -67,16 +62,49 @@ namespace
         return Opcode::greaterI64;
     case BytecodeOpcode::greaterEqualI64:
         return Opcode::greaterEqualI64;
+    case BytecodeOpcode::addF64:
+        return Opcode::addF64;
+    case BytecodeOpcode::subF64:
+        return Opcode::subF64;
+    case BytecodeOpcode::mulF64:
+        return Opcode::mulF64;
+    case BytecodeOpcode::divF64:
+        return Opcode::divF64;
+    case BytecodeOpcode::equalF64:
+        return Opcode::equalF64;
+    case BytecodeOpcode::notEqualF64:
+        return Opcode::notEqualF64;
+    case BytecodeOpcode::lessF64:
+        return Opcode::lessF64;
+    case BytecodeOpcode::lessEqualF64:
+        return Opcode::lessEqualF64;
+    case BytecodeOpcode::greaterF64:
+        return Opcode::greaterF64;
+    case BytecodeOpcode::greaterEqualF64:
+        return Opcode::greaterEqualF64;
+    case BytecodeOpcode::equalBool:
+        return Opcode::equalBool;
+    case BytecodeOpcode::notEqualBool:
+        return Opcode::notEqualBool;
     default:
         return std::nullopt;
     }
 }
 
-[[nodiscard]] bool isComparison(Opcode opcode) noexcept
+[[nodiscard]] bool isComparisonI64(Opcode opcode) noexcept
 {
     return opcode == Opcode::equalI64 || opcode == Opcode::notEqualI64 ||
            opcode == Opcode::lessI64 || opcode == Opcode::lessEqualI64 ||
            opcode == Opcode::greaterI64 || opcode == Opcode::greaterEqualI64;
+}
+
+[[nodiscard]] bool isComparison(Opcode opcode) noexcept
+{
+    return isComparisonI64(opcode) || opcode == Opcode::equalF64 ||
+           opcode == Opcode::notEqualF64 || opcode == Opcode::lessF64 ||
+           opcode == Opcode::lessEqualF64 || opcode == Opcode::greaterF64 ||
+           opcode == Opcode::greaterEqualF64 || opcode == Opcode::equalBool ||
+           opcode == Opcode::notEqualBool;
 }
 } // namespace
 
@@ -95,15 +123,13 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
                                               "IR target function does not exist")}};
     }
     const auto &source = *found;
-    if (source.kind != semantic::FunctionKind::user || !isI64SubsetSignature(source.signature) ||
-        !std::ranges::all_of(source.localTypes,
-                             [](semantic::Type type) { return type == semantic::Type::i64; }))
+    if (source.kind != semantic::FunctionKind::user)
     {
         return {.function = std::nullopt,
                 .failure = LoweringFailure::unsupported,
                 .diagnostics = {loweringError(LoweringFailure::unsupported,
                                               "function #" + std::to_string(source.id) +
-                                                  " is outside the native i64 subset")}};
+                                                  " is not a user function")}};
     }
     if (source.code.empty())
     {
@@ -239,18 +265,31 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
 
             if (instruction.opcode == bytecode::Opcode::constant)
             {
-                if (!instruction.value || !std::holds_alternative<std::int64_t>(*instruction.value))
+                if (!instruction.value)
                     return fail(LoweringFailure::unsupported,
-                                atPc(source.id, pc, "non-i64 constants are outside the native subset"));
-                const auto value = makeValue(semantic::Type::i64);
-                block.instructions.push_back(
-                    Instruction::constantI64(value, std::get<std::int64_t>(*instruction.value)));
+                                atPc(source.id, pc, "constant has no materialized value"));
+                const auto value = makeValue(
+                    std::holds_alternative<std::int64_t>(*instruction.value) ? semantic::Type::i64
+                    : std::holds_alternative<double>(*instruction.value)     ? semantic::Type::f64
+                                                                              : semantic::Type::boolean);
+                if (std::holds_alternative<std::int64_t>(*instruction.value))
+                    block.instructions.push_back(
+                        Instruction::constantI64(value, std::get<std::int64_t>(*instruction.value)));
+                else if (std::holds_alternative<double>(*instruction.value))
+                    block.instructions.push_back(
+                        Instruction::constantF64(value, std::get<double>(*instruction.value)));
+                else
+                    block.instructions.push_back(
+                        Instruction::constantBool(value, std::get<bool>(*instruction.value)));
                 stack.push_back(value);
                 continue;
             }
             if (instruction.opcode == bytecode::Opcode::load)
             {
-                const auto value = makeValue(semantic::Type::i64);
+                if (instruction.operand >= source.localTypes.size())
+                    return fail(LoweringFailure::internalInvariant,
+                                atPc(source.id, pc, "verified bytecode references an invalid local"));
+                const auto value = makeValue(source.localTypes[instruction.operand]);
                 block.instructions.push_back(Instruction::loadLocal(value, instruction.operand));
                 stack.push_back(value);
                 continue;
@@ -270,9 +309,6 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
                 if (!value)
                     return fail(LoweringFailure::internalInvariant,
                                 atPc(source.id, pc, "verified bytecode underflowed the lowering stack"));
-                if (function.valueTypes[*value] != semantic::Type::i64)
-                    return fail(LoweringFailure::unsupported,
-                                atPc(source.id, pc, "first-class non-i64 values are outside the native subset"));
                 continue;
             }
             if (const auto lowered = lowerOpcode(instruction.opcode))
@@ -281,10 +317,13 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
                 if (!right)
                     return fail(LoweringFailure::internalInvariant,
                                 atPc(source.id, pc, "verified bytecode underflowed the lowering stack"));
-                if (*lowered == Opcode::negateI64)
+                if (*lowered == Opcode::negateI64 || *lowered == Opcode::negateF64)
                 {
-                    const auto result = makeValue(semantic::Type::i64);
-                    block.instructions.push_back(Instruction::negateI64(result, *right));
+                    const auto result = makeValue(*lowered == Opcode::negateI64 ? semantic::Type::i64
+                                                                                   : semantic::Type::f64);
+                    block.instructions.push_back(*lowered == Opcode::negateI64
+                                                     ? Instruction::negateI64(result, *right)
+                                                     : Instruction::negateF64(result, *right));
                     stack.push_back(result);
                     continue;
                 }
@@ -292,9 +331,12 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
                 if (!left)
                     return fail(LoweringFailure::internalInvariant,
                                 atPc(source.id, pc, "verified bytecode underflowed the lowering stack"));
+                const bool f64Operation = *lowered == Opcode::addF64 || *lowered == Opcode::subF64 ||
+                                          *lowered == Opcode::mulF64 || *lowered == Opcode::divF64;
                 const auto result = makeValue(isComparison(*lowered) ? semantic::Type::boolean
-                                                                       : semantic::Type::i64);
-                block.instructions.push_back(Instruction::binaryI64(*lowered, result, *left, *right));
+                                                                       : f64Operation ? semantic::Type::f64
+                                                                                      : semantic::Type::i64);
+                block.instructions.push_back(Instruction::binary(*lowered, result, *left, *right));
                 stack.push_back(result);
                 continue;
             }
@@ -303,24 +345,38 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
                 const auto callee = std::find_if(
                     functions.begin(), functions.end(), [&instruction](const bytecode::Function &function)
                     { return function.id == instruction.operand; });
-                if (callee == functions.end() || callee->kind != semantic::FunctionKind::user ||
-                    !isI64SubsetSignature(callee->signature))
-                    return fail(LoweringFailure::unsupported,
-                                atPc(source.id, pc, "call target is outside the native i64 subset"));
+                if (callee == functions.end())
+                    return fail(LoweringFailure::internalInvariant,
+                                atPc(source.id, pc, "verified bytecode has an invalid call target"));
 
                 std::vector<ValueId> arguments(callee->signature.parameterTypes.size());
                 for (std::size_t index = arguments.size(); index > 0; --index)
                 {
                     const auto argument = pop(pc);
-                    if (!argument || function.valueTypes[*argument] != semantic::Type::i64)
+                    if (!argument || function.valueTypes[*argument] != callee->signature.parameterTypes[index - 1])
                         return fail(LoweringFailure::internalInvariant,
                                     atPc(source.id, pc, "verified bytecode has an invalid call argument"));
                     arguments[index - 1] = *argument;
                 }
-                const auto result = makeValue(semantic::Type::i64);
-                block.instructions.push_back(
-                    Instruction::callI64(result, callee->id, std::move(arguments)));
-                stack.push_back(result);
+                if (callee->signature.returnType == semantic::Type::voidType)
+                {
+                    block.instructions.push_back(
+                        Instruction::callVoid(callee->id, std::move(arguments), callee->kind));
+                }
+                else
+                {
+                    const auto result = makeValue(callee->signature.returnType);
+                    block.instructions.push_back(callee->signature.returnType == semantic::Type::i64 &&
+                                                         std::ranges::all_of(
+                                                             callee->signature.parameterTypes,
+                                                             [](semantic::Type type)
+                                                             { return type == semantic::Type::i64; })
+                                                     ? Instruction::callI64(result, callee->id,
+                                                                            std::move(arguments), callee->kind)
+                                                     : Instruction::callValue(result, callee->id,
+                                                                              std::move(arguments), callee->kind));
+                    stack.push_back(result);
+                }
                 continue;
             }
             if (instruction.opcode == bytecode::Opcode::jump)
@@ -364,8 +420,17 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
                 terminated = true;
                 continue;
             }
+            if (instruction.opcode == bytecode::Opcode::returnVoid)
+            {
+                if (!stack.empty())
+                    return fail(LoweringFailure::internalInvariant,
+                                atPc(source.id, pc, "verified bytecode returns void with a non-empty stack"));
+                block.terminator = Terminator::returnVoid();
+                terminated = true;
+                continue;
+            }
             return fail(LoweringFailure::unsupported,
-                        atPc(source.id, pc, "bytecode opcode is outside the native i64 subset"));
+                        atPc(source.id, pc, "bytecode opcode is outside the native v0.1 subset"));
         }
         if (!terminated)
         {
@@ -382,7 +447,7 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram &program,
         function.blocks.push_back(std::move(block));
     }
 
-    auto verified = Verifier{}.verify(std::move(function));
+    auto verified = Verifier{}.verify(std::move(function), CallTargetTable::fromVerifiedProgram(program));
     if (verified.function)
         return {.function = std::move(verified.function), .failure = std::nullopt, .diagnostics = {}};
     std::vector<support::Diagnostic> diagnostics;

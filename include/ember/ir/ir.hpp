@@ -22,9 +22,12 @@ enum class Opcode : std::uint8_t
 {
     parameter,
     constantI64,
+    constantF64,
+    constantBool,
     loadLocal,
     storeLocal,
     negateI64,
+    negateF64,
     addI64,
     subI64,
     mulI64,
@@ -36,7 +39,21 @@ enum class Opcode : std::uint8_t
     lessEqualI64,
     greaterI64,
     greaterEqualI64,
+    addF64,
+    subF64,
+    mulF64,
+    divF64,
+    equalF64,
+    notEqualF64,
+    lessF64,
+    lessEqualF64,
+    greaterF64,
+    greaterEqualF64,
+    equalBool,
+    notEqualBool,
     callI64,
+    callValue,
+    callVoid,
 };
 
 struct Instruction
@@ -49,17 +66,28 @@ struct Instruction
     LocalId local{noLocal};
     std::int64_t constant{};
     semantic::FunctionId callee{noFunction};
+    semantic::FunctionKind calleeKind{semantic::FunctionKind::user};
     std::vector<ValueId> arguments;
 
     [[nodiscard]] static Instruction parameter(ValueId result, LocalId local) noexcept;
     [[nodiscard]] static Instruction constantI64(ValueId result, std::int64_t value) noexcept;
+    [[nodiscard]] static Instruction constantF64(ValueId result, double value) noexcept;
+    [[nodiscard]] static Instruction constantBool(ValueId result, bool value) noexcept;
     [[nodiscard]] static Instruction loadLocal(ValueId result, LocalId local) noexcept;
     [[nodiscard]] static Instruction storeLocal(LocalId local, ValueId value) noexcept;
     [[nodiscard]] static Instruction negateI64(ValueId result, ValueId input) noexcept;
-    [[nodiscard]] static Instruction binaryI64(Opcode opcode, ValueId result, ValueId left,
-                                               ValueId right) noexcept;
+    [[nodiscard]] static Instruction negateF64(ValueId result, ValueId input) noexcept;
+    [[nodiscard]] static Instruction binary(Opcode opcode, ValueId result, ValueId left,
+                                            ValueId right) noexcept;
     [[nodiscard]] static Instruction callI64(ValueId result, semantic::FunctionId callee,
-                                             std::vector<ValueId> arguments);
+                                             std::vector<ValueId> arguments,
+                                             semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+    [[nodiscard]] static Instruction callValue(ValueId result, semantic::FunctionId callee,
+                                                std::vector<ValueId> arguments,
+                                                semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+    [[nodiscard]] static Instruction callVoid(semantic::FunctionId callee,
+                                               std::vector<ValueId> arguments,
+                                               semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
 };
 
 // Visits every virtual-register use encoded by one instruction. Shared by
@@ -72,6 +100,7 @@ void forEachUseImpl(InstructionType &instruction, Callback &&callback)
     {
     case Opcode::storeLocal:
     case Opcode::negateI64:
+    case Opcode::negateF64:
         callback(instruction.input);
         break;
     case Opcode::addI64:
@@ -85,15 +114,31 @@ void forEachUseImpl(InstructionType &instruction, Callback &&callback)
     case Opcode::lessEqualI64:
     case Opcode::greaterI64:
     case Opcode::greaterEqualI64:
+    case Opcode::addF64:
+    case Opcode::subF64:
+    case Opcode::mulF64:
+    case Opcode::divF64:
+    case Opcode::equalF64:
+    case Opcode::notEqualF64:
+    case Opcode::lessF64:
+    case Opcode::lessEqualF64:
+    case Opcode::greaterF64:
+    case Opcode::greaterEqualF64:
+    case Opcode::equalBool:
+    case Opcode::notEqualBool:
         callback(instruction.left);
         callback(instruction.right);
         break;
     case Opcode::callI64:
+    case Opcode::callValue:
+    case Opcode::callVoid:
         for (auto &argument : instruction.arguments)
             callback(argument);
         break;
     case Opcode::parameter:
     case Opcode::constantI64:
+    case Opcode::constantF64:
+    case Opcode::constantBool:
     case Opcode::loadLocal:
         break;
     }

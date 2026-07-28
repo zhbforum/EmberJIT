@@ -62,6 +62,46 @@ using ember::semantic::Type;
     return !ember::ir::Verifier{}.verify(std::move(function)).function.has_value();
 }
 
+[[nodiscard]] auto testCallTargets() -> std::optional<ember::ir::CallTargetTable>
+{
+    const auto verified = ember::bytecode::Verifier{}.verify(
+        {.functions = {{.id = 7,
+                        .kind = ember::semantic::FunctionKind::user,
+                        .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
+                        .localCount = 1,
+                        .localTypes = {Type::i64},
+                        .code = {{.opcode = ember::bytecode::Opcode::load, .operand = 0, .value = std::nullopt},
+                                 {.opcode = ember::bytecode::Opcode::returnValue,
+                                  .operand = 0,
+                                  .value = std::nullopt}}},
+                       {.id = 8,
+                        .kind = ember::semantic::FunctionKind::user,
+                        .signature = {.parameterTypes = {Type::i64, Type::i64}, .returnType = Type::i64},
+                        .localCount = 2,
+                       .localTypes = {Type::i64, Type::i64},
+                        .code = {{.opcode = ember::bytecode::Opcode::load, .operand = 0, .value = std::nullopt},
+                                 {.opcode = ember::bytecode::Opcode::returnValue,
+                                  .operand = 0,
+                                  .value = std::nullopt}}},
+                       {.id = 9,
+                        .kind = ember::semantic::FunctionKind::user,
+                        .signature = {.parameterTypes = {}, .returnType = Type::voidType},
+                        .localCount = 0,
+                       .localTypes = {},
+                        .code = {{.opcode = ember::bytecode::Opcode::returnVoid,
+                                  .operand = 0,
+                                  .value = std::nullopt}}},
+                       {.id = 2,
+                        .kind = ember::semantic::FunctionKind::host,
+                        .signature = {.parameterTypes = {}, .returnType = Type::i64},
+                        .localCount = 0,
+                        .localTypes = {},
+                        .code = {}}}});
+    if (!verified.program)
+        return std::nullopt;
+    return ember::ir::CallTargetTable::fromVerifiedProgram(*verified.program);
+}
+
 EMBER_TEST("IR lowering creates explicit CFG blocks and virtual registers")
 {
     auto bytecode = compileAndVerify(
@@ -136,7 +176,7 @@ EMBER_TEST("IR verifier rejects non-local virtual-register uses")
     const auto laterDefinition = baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 0), Instruction::constantI64(1, 1),
-                           Instruction::binaryI64(Opcode::lessI64, 2, 0, 1)},
+                           Instruction::binary(Opcode::lessI64, 2, 0, 1)},
           .terminator = Terminator::branchIfFalse(2, 2, 1)},
          {.id = 1, .instructions = {}, .terminator = Terminator::returnValue(3)},
          {.id = 2, .instructions = {}, .terminator = Terminator::branch(3)},
@@ -150,14 +190,14 @@ EMBER_TEST("IR verifier rejects non-local virtual-register uses")
     const auto diamond = baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 0), Instruction::constantI64(1, 1),
-                           Instruction::binaryI64(Opcode::lessI64, 2, 0, 1)},
+                           Instruction::binary(Opcode::lessI64, 2, 0, 1)},
           .terminator = Terminator::branchIfFalse(2, 2, 1)},
          {.id = 1,
           .instructions = {Instruction::constantI64(3, 42)},
           .terminator = Terminator::branch(3)},
          {.id = 2, .instructions = {}, .terminator = Terminator::branch(3)},
          {.id = 3,
-          .instructions = {Instruction::binaryI64(Opcode::addI64, 4, 3, 0)},
+          .instructions = {Instruction::binary(Opcode::addI64, 4, 3, 0)},
           .terminator = Terminator::returnValue(4)}},
         {Type::i64, Type::i64, Type::boolean, Type::i64, Type::i64});
     tests.expect(rejects(diamond), "diamond merge cannot read a value defined on one predecessor");
@@ -260,7 +300,7 @@ EMBER_TEST("IR verifier checks return types and local initialization merges")
     const auto partialInitialization = baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 0), Instruction::constantI64(1, 1),
-                           Instruction::binaryI64(Opcode::lessI64, 2, 0, 1)},
+                           Instruction::binary(Opcode::lessI64, 2, 0, 1)},
           .terminator = Terminator::branchIfFalse(2, 2, 1)},
          {.id = 1,
           .instructions = {Instruction::constantI64(3, 7), Instruction::storeLocal(0, 3)},
@@ -275,7 +315,7 @@ EMBER_TEST("IR verifier checks return types and local initialization merges")
     const auto completeInitialization = baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 0), Instruction::constantI64(1, 1),
-                           Instruction::binaryI64(Opcode::lessI64, 2, 0, 1)},
+                           Instruction::binary(Opcode::lessI64, 2, 0, 1)},
           .terminator = Terminator::branchIfFalse(2, 2, 1)},
          {.id = 1,
           .instructions = {Instruction::constantI64(3, 7), Instruction::storeLocal(0, 3)},
@@ -290,6 +330,83 @@ EMBER_TEST("IR verifier checks return types and local initialization merges")
     tests.expect(!rejects(completeInitialization), "local initialized on every merge edge verifies");
 }
 
+EMBER_TEST("IR verifier enforces trusted typed call contracts")
+{
+    const auto callTargets = testCallTargets();
+    if (!callTargets)
+    {
+        tests.expect(false, "trusted call-target fixture verifies");
+        return;
+    }
+    const auto rejectsCall = [&callTargets](Function function)
+    {
+        return !ember::ir::Verifier{}.verify(std::move(function), *callTargets).function.has_value();
+    };
+
+    tests.expect(rejectsCall(baseI64Function(
+                     {{.id = 0,
+                       .instructions = {Instruction::constantF64(0, 1.0),
+                                        Instruction::callI64(1, 7, {0})},
+                       .terminator = Terminator::returnValue(1)}},
+                     {Type::f64, Type::i64})),
+                 "call_i64 rejects an argument whose virtual-register type is not i64");
+
+    tests.expect(rejectsCall(
+                     {.id = 0,
+                      .signature = {.parameterTypes = {}, .returnType = Type::f64},
+                      .localTypes = {},
+                      .valueTypes = {Type::f64},
+                      .blocks = {{.id = 0,
+                                  .instructions = {Instruction::callValue(
+                                      0, 2, {}, ember::semantic::FunctionKind::host)},
+                                  .terminator = Terminator::returnValue(0)}}}),
+                 "call_value rejects an f64 result for the host clock_ms i64 signature");
+
+    tests.expect(rejectsCall(
+                     {.id = 0,
+                      .signature = {.parameterTypes = {}, .returnType = Type::voidType},
+                      .localTypes = {},
+                      .valueTypes = {Type::i64},
+                      .blocks = {{.id = 0,
+                                  .instructions = {Instruction::constantI64(0, 1),
+                                                   Instruction::callVoid(7, {0})},
+                                  .terminator = Terminator::returnVoid()}}}),
+                 "call_void rejects a non-void target");
+
+    tests.expect(rejectsCall(baseI64Function(
+                     {{.id = 0,
+                       .instructions = {Instruction::callValue(0, 9, {})},
+                       .terminator = Terminator::returnValue(0)}},
+                     {Type::i64})),
+                 "call_value rejects a void target");
+
+    tests.expect(rejectsCall(baseI64Function(
+                     {{.id = 0,
+                       .instructions = {Instruction::constantI64(0, 1),
+                                        Instruction::callI64(1, 7, {0},
+                                                             ember::semantic::FunctionKind::host)},
+                       .terminator = Terminator::returnValue(1)}},
+                     {Type::i64, Type::i64})),
+                 "call rejects callee-kind metadata that differs from the trusted target");
+
+    tests.expect(rejectsCall(baseI64Function(
+                     {{.id = 0,
+                       .instructions = {Instruction::constantI64(0, 1),
+                                        Instruction::callI64(1, 99, {0})},
+                       .terminator = Terminator::returnValue(1)}},
+                     {Type::i64, Type::i64})),
+                 "call rejects a target that is absent from the trusted target table");
+
+    auto nonCallMetadata = baseI64Function(
+        {{.id = 0,
+          .instructions = {Instruction::constantI64(0, 1)},
+          .terminator = Terminator::returnValue(0)}},
+        {Type::i64});
+    nonCallMetadata.blocks[0].instructions[0].calleeKind = ember::semantic::FunctionKind::host;
+    tests.expect(rejectsCall(std::move(nonCallMetadata)),
+                 "non-call instructions reject non-default callee metadata");
+}
+
 EMBER_TEST("IR verifier reaches a stable local-initialization fixed point through loops")
 {
     const auto loop = baseI64Function(
@@ -298,11 +415,11 @@ EMBER_TEST("IR verifier reaches a stable local-initialization fixed point throug
           .terminator = Terminator::branch(1)},
          {.id = 1,
           .instructions = {Instruction::loadLocal(1, 0), Instruction::constantI64(2, 3),
-                           Instruction::binaryI64(Opcode::lessI64, 3, 1, 2)},
+                           Instruction::binary(Opcode::lessI64, 3, 1, 2)},
           .terminator = Terminator::branchIfFalse(3, 3, 2)},
          {.id = 2,
           .instructions = {Instruction::loadLocal(4, 0), Instruction::constantI64(5, 1),
-                           Instruction::binaryI64(Opcode::addI64, 6, 4, 5),
+                           Instruction::binary(Opcode::addI64, 6, 4, 5),
                            Instruction::storeLocal(0, 6)},
           .terminator = Terminator::branch(1)},
          {.id = 3,
@@ -343,7 +460,7 @@ EMBER_TEST("IR verifier accepts the declared f64 bool and void type model")
                  "void return type model verifies without a runtime value");
 }
 
-EMBER_TEST("IR lowering fail-closes unsupported forms with precise diagnostics")
+EMBER_TEST("IR lowering materializes every native v0.1 value form")
 {
     auto callProgram = compileAndVerify(
         "fn id(value: i64) -> i64 { return value; } fn main() -> i64 { return id(1); }");
@@ -368,22 +485,19 @@ EMBER_TEST("IR lowering fail-closes unsupported forms with precise diagnostics")
         return;
     }
     const auto boolLowered = ember::ir::Lowerer{}.lower(*boolProgram, 0);
-    tests.expect(!boolLowered.function &&
-                     boolLowered.failure == ember::ir::LoweringFailure::unsupported,
-                 "bool literal condition is outside the initial native subset");
+    tests.expect(boolLowered.function.has_value() && !boolLowered.failure,
+                 "bool literal condition lowers to a native branch condition");
 
     auto boolLocalProgram = compileAndVerify(
         "fn main() -> i64 { let value: bool = true; if value { return 1; } else { return 0; } }");
     auto f64LocalProgram = compileAndVerify(
         "fn main() -> i64 { let value: f64 = 1.0; return 1; }");
     tests.expect(boolLocalProgram.has_value() &&
-                     ember::ir::Lowerer{}.lower(*boolLocalProgram, 0).failure ==
-                         ember::ir::LoweringFailure::unsupported,
-                 "first-class bool local is rejected");
+                     ember::ir::Lowerer{}.lower(*boolLocalProgram, 0).function.has_value(),
+                 "first-class bool local lowers to a verifier-checked IR value");
     tests.expect(f64LocalProgram.has_value() &&
-                     ember::ir::Lowerer{}.lower(*f64LocalProgram, 0).failure ==
-                         ember::ir::LoweringFailure::unsupported,
-                 "f64 local in an i64 function is rejected");
+                     ember::ir::Lowerer{}.lower(*f64LocalProgram, 0).function.has_value(),
+                 "f64 local in an i64 function lowers to a verifier-checked IR value");
 
     auto stackEdgeProgram = ember::bytecode::Verifier{}.verify(
         {.functions = {{.id = 0,
@@ -422,7 +536,7 @@ EMBER_TEST("IR constant folding preserves wrapping i64 semantics and re-verifies
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, std::numeric_limits<std::int64_t>::max()),
                            Instruction::constantI64(1, 1),
-                           Instruction::binaryI64(Opcode::addI64, 2, 0, 1),
+                           Instruction::binary(Opcode::addI64, 2, 0, 1),
                            Instruction::negateI64(3, 2)},
           .terminator = Terminator::returnValue(3)}},
         {Type::i64, Type::i64, Type::i64, Type::i64}));
@@ -444,7 +558,7 @@ EMBER_TEST("IR constant folding preserves wrapping i64 semantics and re-verifies
     auto divisionFixture = ember::ir::Verifier{}.verify(baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 1), Instruction::constantI64(1, 0),
-                           Instruction::binaryI64(Opcode::divI64, 2, 0, 1)},
+                           Instruction::binary(Opcode::divI64, 2, 0, 1)},
           .terminator = Terminator::returnValue(2)}},
         {Type::i64, Type::i64, Type::i64}));
     tests.expect(divisionFixture.function.has_value(), "division folding fixture verifies");
@@ -458,7 +572,7 @@ EMBER_TEST("IR constant folding preserves wrapping i64 semantics and re-verifies
     auto remainderFixture = ember::ir::Verifier{}.verify(baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 1), Instruction::constantI64(1, 0),
-                           Instruction::binaryI64(Opcode::remI64, 2, 0, 1)},
+                           Instruction::binary(Opcode::remI64, 2, 0, 1)},
           .terminator = Terminator::returnValue(2)}},
         {Type::i64, Type::i64, Type::i64}));
     tests.expect(remainderFixture.function.has_value(), "remainder folding fixture verifies");
@@ -472,7 +586,7 @@ EMBER_TEST("IR constant folding preserves wrapping i64 semantics and re-verifies
     auto comparisonFixture = ember::ir::Verifier{}.verify(baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 2), Instruction::constantI64(1, 3),
-                           Instruction::binaryI64(Opcode::lessI64, 2, 0, 1),
+                           Instruction::binary(Opcode::lessI64, 2, 0, 1),
                            Instruction::constantI64(3, 0)},
           .terminator = Terminator::returnValue(3)}},
         {Type::i64, Type::i64, Type::boolean, Type::i64}));
@@ -487,6 +601,12 @@ EMBER_TEST("IR constant folding preserves wrapping i64 semantics and re-verifies
 
 EMBER_TEST("IR propagation and DCE retain required effects while removing dead pure values")
 {
+    const auto callTargets = testCallTargets();
+    if (!callTargets)
+    {
+        tests.expect(false, "trusted call-target fixture verifies");
+        return;
+    }
     auto propagationFixture = ember::ir::Verifier{}.verify(baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 7), Instruction::storeLocal(0, 0),
@@ -556,7 +676,7 @@ EMBER_TEST("IR propagation and DCE retain required effects while removing dead p
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 2), Instruction::storeLocal(0, 0),
                            Instruction::loadLocal(1, 0), Instruction::constantI64(2, 3),
-                           Instruction::binaryI64(Opcode::addI64, 3, 1, 2)},
+                           Instruction::binary(Opcode::addI64, 3, 1, 2)},
           .terminator = Terminator::returnValue(3)}},
         {Type::i64, Type::i64, Type::i64, Type::i64}, {Type::i64}));
     tests.expect(refoldingFixture.function.has_value(), "post-propagation folding fixture verifies");
@@ -584,11 +704,11 @@ EMBER_TEST("IR propagation and DCE retain required effects while removing dead p
     auto effectFixture = ember::ir::Verifier{}.verify(baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 1), Instruction::constantI64(1, 0),
-                           Instruction::binaryI64(Opcode::divI64, 2, 0, 1),
-                           Instruction::binaryI64(Opcode::remI64, 3, 0, 1),
+                           Instruction::binary(Opcode::divI64, 2, 0, 1),
+                           Instruction::binary(Opcode::remI64, 3, 0, 1),
                            Instruction::callI64(4, 7, {0}), Instruction::constantI64(5, 42)},
           .terminator = Terminator::returnValue(5)}},
-        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64}));
+        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64}), *callTargets);
     tests.expect(effectFixture.function.has_value(), "DCE observable-effect fixture verifies");
     if (!effectFixture.function)
         return;
@@ -600,11 +720,12 @@ EMBER_TEST("IR propagation and DCE retain required effects while removing dead p
     auto remapFixture = ember::ir::Verifier{}.verify(baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 99), Instruction::constantI64(1, 7),
-                           Instruction::constantI64(2, 8), Instruction::binaryI64(Opcode::addI64, 3, 1, 2),
+                           Instruction::constantI64(2, 8), Instruction::binary(Opcode::addI64, 3, 1, 2),
                            Instruction::storeLocal(0, 3), Instruction::loadLocal(4, 0),
-                           Instruction::callI64(5, 7, {4, 1}), Instruction::constantI64(6, 42)},
+                           Instruction::callI64(5, 8, {4, 1}), Instruction::constantI64(6, 42)},
           .terminator = Terminator::returnValue(6)}},
-        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64}, {Type::i64}));
+        {Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64, Type::i64}, {Type::i64}),
+        *callTargets);
     tests.expect(remapFixture.function.has_value(), "DCE remapping fixture verifies");
     if (!remapFixture.function)
         return;
@@ -626,11 +747,11 @@ EMBER_TEST("IR default optimization pipeline simplifies constant CFG and exposes
     auto verified = ember::ir::Verifier{}.verify(baseI64Function(
         {{.id = 0,
           .instructions = {Instruction::constantI64(0, 2), Instruction::constantI64(1, 3),
-                           Instruction::binaryI64(Opcode::addI64, 2, 0, 1),
+                           Instruction::binary(Opcode::addI64, 2, 0, 1),
                            Instruction::constantI64(3, 4),
-                           Instruction::binaryI64(Opcode::mulI64, 4, 2, 3),
+                           Instruction::binary(Opcode::mulI64, 4, 2, 3),
                            Instruction::constantI64(5, 0),
-                           Instruction::binaryI64(Opcode::equalI64, 6, 4, 5),
+                           Instruction::binary(Opcode::equalI64, 6, 4, 5),
                            Instruction::storeLocal(0, 4)},
           .terminator = Terminator::branchIfFalse(6, 2, 1)},
          {.id = 1,
@@ -672,7 +793,7 @@ EMBER_TEST("CFG simplification evaluates every i64 comparison only in branch con
         auto verified = ember::ir::Verifier{}.verify(baseI64Function(
             {{.id = 0,
               .instructions = {Instruction::constantI64(0, left), Instruction::constantI64(1, right),
-                               Instruction::binaryI64(opcode, 2, 0, 1)},
+                               Instruction::binary(opcode, 2, 0, 1)},
               .terminator = Terminator::branchIfFalse(2, 2, 1)},
              {.id = 1,
               .instructions = {Instruction::constantI64(3, 11)},
@@ -705,7 +826,7 @@ EMBER_TEST("CFG simplification evaluates every i64 comparison only in branch con
          .valueTypes = {Type::i64, Type::i64, Type::boolean, Type::i64},
          .blocks = {{.id = 0,
                      .instructions = {Instruction::parameter(0, 0), Instruction::constantI64(1, 0),
-                                      Instruction::binaryI64(Opcode::equalI64, 2, 0, 1)},
+                                      Instruction::binary(Opcode::equalI64, 2, 0, 1)},
                      .terminator = Terminator::branchIfFalse(2, 1, 1)},
                     {.id = 1,
                      .instructions = {Instruction::constantI64(3, 7)},
