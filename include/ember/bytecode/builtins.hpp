@@ -1,10 +1,13 @@
 #pragma once
 
+#include "ember/bytecode/bytecode.hpp"
 #include "ember/semantic/analyzer.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -17,11 +20,32 @@ enum class BuiltinKind : std::uint32_t
     clockMs = 2,
 };
 
+enum class NativeBuiltinAbi : std::uint8_t
+{
+    i64ToVoid,
+    f64ToVoid,
+    voidToI64,
+};
+
+// These fixed-signature adapters are the only native entry points exported by
+// the trusted builtin registry. They are noexcept because generated code has
+// no C++ unwind metadata.
+void nativePrintI64(std::int64_t value) noexcept;
+void nativePrintF64(double value) noexcept;
+[[nodiscard]] std::int64_t nativeClockMs() noexcept;
+
+struct BuiltinInvocation
+{
+    bool succeeded{};
+    std::optional<Value> value;
+};
+
 struct BuiltinDescriptor
 {
     BuiltinKind kind;
     std::string_view name;
     semantic::FunctionSignature signature;
+    NativeBuiltinAbi nativeAbi;
 
     [[nodiscard]] constexpr semantic::FunctionId id() const noexcept
     {
@@ -33,10 +57,13 @@ struct BuiltinDescriptor
 {
     static const std::array descriptors{
         BuiltinDescriptor{
-            BuiltinKind::printI64, "print_i64", {{semantic::Type::i64}, semantic::Type::voidType}},
+            BuiltinKind::printI64, "print_i64", {{semantic::Type::i64}, semantic::Type::voidType},
+            NativeBuiltinAbi::i64ToVoid},
         BuiltinDescriptor{
-            BuiltinKind::printF64, "print_f64", {{semantic::Type::f64}, semantic::Type::voidType}},
-        BuiltinDescriptor{BuiltinKind::clockMs, "clock_ms", {{}, semantic::Type::i64}},
+            BuiltinKind::printF64, "print_f64", {{semantic::Type::f64}, semantic::Type::voidType},
+            NativeBuiltinAbi::f64ToVoid},
+        BuiltinDescriptor{BuiltinKind::clockMs, "clock_ms", {{}, semantic::Type::i64},
+                          NativeBuiltinAbi::voidToI64},
     };
     return descriptors;
 }
@@ -63,4 +90,10 @@ struct BuiltinDescriptor
     }
     return true;
 }
+
+// The shared VM/bridge dispatch path validates the descriptor signature and
+// keeps host effects in one place. A void builtin has `value == nullopt`.
+[[nodiscard]] BuiltinInvocation invokeBuiltin(const BuiltinDescriptor &builtin,
+                                              std::span<const Value> arguments) noexcept;
+[[nodiscard]] std::uintptr_t nativeBuiltinEntry(const BuiltinDescriptor &builtin) noexcept;
 } // namespace ember::bytecode
