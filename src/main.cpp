@@ -14,15 +14,19 @@
 #include "ember/support/diagnostic.hpp"
 #include "ember/support/source.hpp"
 
+#include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace
@@ -33,6 +37,34 @@ struct RunOptions
     bool traceJit{};
     bool jitEnabled{true};
 };
+
+struct BenchmarkOptions
+{
+    std::uint64_t iterations{10};
+};
+
+struct PreparedRuntimeProgram
+{
+    ember::support::SourceText source;
+    ember::semantic::AnalysisResult analysis;
+    ember::bytecode::VerifiedProgram verifiedProgram;
+};
+
+struct RunOptionsParseResult
+{
+    std::optional<RunOptions> options;
+    std::string_view path;
+    std::string error;
+};
+
+struct BenchmarkOptionsParseResult
+{
+    std::optional<BenchmarkOptions> options;
+    std::string_view path;
+    std::string error;
+};
+
+constexpr std::uint64_t maximumBenchmarkIterations{100'000};
 
 [[nodiscard]] auto diagnosticSeverityName(ember::support::DiagnosticSeverity severity) noexcept
     -> std::string_view
@@ -221,6 +253,72 @@ void printOptimizationFailure(const ember::ir::OptimizationResult &result)
     return source;
 }
 
+[[nodiscard]] auto prepareRuntimeProgram(std::string_view path, std::string contents)
+    -> std::optional<PreparedRuntimeProgram>
+{
+    ember::semantic::AnalysisResult analysis;
+    auto source = analyzeForRuntime(path, std::move(contents), analysis);
+    if (!source)
+        return std::nullopt;
+    if (!analysis.program)
+    {
+        std::cerr << "internal error: semantic analysis completed without a typed program\n";
+        return std::nullopt;
+    }
+
+    auto compiled = ember::bytecode::Compiler{}.compile(*analysis.program);
+    if (!compiled.program)
+    {
+        for (const auto &diagnostic : compiled.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return std::nullopt;
+    }
+    auto checked = ember::bytecode::Verifier{}.verify(std::move(*compiled.program));
+    if (!checked.program)
+    {
+        for (const auto &diagnostic : checked.diagnostics)
+            std::cerr << "bytecode error: " << diagnostic.message << '\n';
+        return std::nullopt;
+    }
+
+    return PreparedRuntimeProgram{
+        .source = std::move(*source),
+        .analysis = std::move(analysis),
+        .verifiedProgram = std::move(*checked.program),
+    };
+}
+
+[[nodiscard]] auto findCliEntryPoint(std::string_view path, const PreparedRuntimeProgram &program)
+    -> std::optional<ember::semantic::FunctionId>
+{
+    const auto entry = std::find_if(
+        program.analysis.program->declarations.begin(), program.analysis.program->declarations.end(),
+        [](const auto &function) { return function.name == "main"; });
+    if (entry == program.analysis.program->declarations.end())
+    {
+        printEntryPointDiagnostic(path, program.source,
+                                  {.source = program.source.id(),
+                                   .begin = program.source.size(),
+                                   .end = program.source.size()},
+                                  "missing user entry function 'main'");
+        return std::nullopt;
+    }
+    if (!entry->signature.parameterTypes.empty())
+    {
+        printEntryPointDiagnostic(path, program.source, entry->nameSpan,
+                                  "entry function 'main' must not accept parameters");
+        return std::nullopt;
+    }
+    if (entry->signature.returnType != ember::semantic::Type::voidType &&
+        entry->signature.returnType != ember::semantic::Type::i64)
+    {
+        printEntryPointDiagnostic(path, program.source, entry->nameSpan,
+                                  "entry function 'main' must return void or i64");
+        return std::nullopt;
+    }
+    return entry->id;
+}
+
 [[nodiscard]] int dumpBytecode(std::string_view path, std::string contents)
 {
     ember::semantic::AnalysisResult analysis;
@@ -367,76 +465,35 @@ void printOptimizationFailure(const ember::ir::OptimizationResult &result)
     return 0;
 }
 
-[[nodiscard]] int runVm(std::string_view path, std::string contents, const RunOptions &options)
+void printJitTrace(const ember::semantic::AnalysisResult &analysis,
+                   const ember::runtime::ExecutionReport &report)
 {
-    ember::semantic::AnalysisResult analysis;
-    const auto source = analyzeForRuntime(path, std::move(contents), analysis);
-    if (!source)
-        return 1;
+    std::unordered_map<ember::semantic::FunctionId, std::string> functionNames;
+    functionNames.reserve(analysis.program->declarations.size());
+    for (const auto &function : analysis.program->declarations)
+        functionNames.emplace(function.id, function.name);
 
-    const auto entry = std::find_if(
-        analysis.program->declarations.begin(), analysis.program->declarations.end(),
-        [](const auto &function) { return function.name == "main"; });
-    if (entry == analysis.program->declarations.end())
+    for (const auto &event : report.hotEvents)
     {
-        printEntryPointDiagnostic(path, *source,
-                                  {.source = source->id(),
-                                   .begin = source->size(),
-                                   .end = source->size()},
-                                  "missing user entry function 'main'");
-        return 1;
+        const auto name = functionNames.find(event.functionId);
+        std::cerr << "[jit] function "
+                  << (name == functionNames.end() ? "<unknown>" : name->second)
+                  << " became hot after " << event.invocationCount << " calls\n";
     }
-    if (!entry->signature.parameterTypes.empty())
-    {
-        printEntryPointDiagnostic(path, *source, entry->nameSpan,
-                                  "entry function 'main' must not accept parameters");
-        return 1;
-    }
-    if (entry->signature.returnType != ember::semantic::Type::voidType &&
-        entry->signature.returnType != ember::semantic::Type::i64)
-    {
-        printEntryPointDiagnostic(path, *source, entry->nameSpan,
-                                  "entry function 'main' must return void or i64");
-        return 1;
-    }
+}
 
-    auto compiled = ember::bytecode::Compiler{}.compile(*analysis.program);
-    if (!compiled.program)
-    {
-        for (const auto &diagnostic : compiled.diagnostics)
-            std::cerr << "bytecode error: " << diagnostic.message << '\n';
-        return 1;
-    }
-    auto checked = ember::bytecode::Verifier{}.verify(std::move(*compiled.program));
-    if (!checked.program)
-    {
-        for (const auto &diagnostic : checked.diagnostics)
-            std::cerr << "bytecode error: " << diagnostic.message << '\n';
-        return 1;
-    }
-    ember::runtime::RuntimeOptions runtimeOptions{
+[[nodiscard]] int runVm(PreparedRuntimeProgram program, ember::semantic::FunctionId entry,
+                        const RunOptions &options)
+{
+    const ember::runtime::RuntimeOptions runtimeOptions{
         .hotThreshold = options.hotThreshold,
         .jitEnabled = options.jitEnabled,
         .profilingEnabled = true,
     };
-    auto vm = ember::runtime::VirtualMachine::create(std::move(*checked.program),
-                                                      std::move(runtimeOptions));
-    const auto report = vm.execute(entry->id);
+    auto vm = ember::runtime::VirtualMachine::create(std::move(program.verifiedProgram), runtimeOptions);
+    const auto report = vm.execute(entry);
     if (options.traceJit)
-    {
-        std::unordered_map<ember::semantic::FunctionId, std::string> functionNames;
-        functionNames.reserve(analysis.program->declarations.size());
-        for (const auto &function : analysis.program->declarations)
-            functionNames.emplace(function.id, function.name);
-
-        for (const auto &event : report.hotEvents)
-        {
-            const auto name = functionNames.find(event.functionId);
-            std::cerr << "[jit] function "
-                      << (name == functionNames.end() ? "<unknown>" : name->second)
-                      << " became hot after " << event.invocationCount << " calls\n";
-        }
-    }
+        printJitTrace(program.analysis, report);
     if (report.result.error)
     {
         std::cerr << "runtime error[" << report.result.error->code << "]: "
@@ -447,12 +504,257 @@ void printOptimizationFailure(const ember::ir::OptimizationResult &result)
     return 0;
 }
 
-void printUsage(std::string_view executable)
+[[nodiscard]] auto cloneVerifiedProgram(const ember::bytecode::VerifiedProgram &program)
+    -> std::optional<ember::bytecode::VerifiedProgram>
 {
-    std::cerr << "usage: " << executable
-              << " <dump-tokens|dump-ast|dump-typed-ast|dump-bytecode|dump-ir|dump-asm> <file>\n"
-              << "       " << executable
-              << " run [--no-jit] [--jit-threshold=<non-negative-integer>] [--trace-jit] <file>\n";
+    auto checked = ember::bytecode::Verifier{}.verify(program.program());
+    if (!checked.program)
+    {
+        std::cerr << "internal error: unable to clone verified bytecode for benchmark\n";
+        return std::nullopt;
+    }
+    return std::move(*checked.program);
+}
+
+[[nodiscard]] bool executeBenchmarkIteration(ember::runtime::VirtualMachine &vm,
+                                              ember::semantic::FunctionId entry)
+{
+    const auto report = vm.execute(entry);
+    if (!report.result.error)
+        return true;
+
+    std::cerr << "runtime error[" << report.result.error->code << "]: "
+              << report.result.error->message << '\n';
+    return false;
+}
+
+class DiscardingStreamBuffer final : public std::streambuf
+{
+  protected:
+    auto overflow(int_type character) -> int_type override { return traits_type::not_eof(character); }
+
+    auto xsputn(const char *, std::streamsize count) -> std::streamsize override { return count; }
+};
+
+class ScopedStandardOutputSilencer
+{
+  public:
+    ScopedStandardOutputSilencer() : previous_(std::cout.rdbuf(&sink_)) {}
+
+    ScopedStandardOutputSilencer(const ScopedStandardOutputSilencer &) = delete;
+    auto operator=(const ScopedStandardOutputSilencer &) -> ScopedStandardOutputSilencer & = delete;
+
+    ~ScopedStandardOutputSilencer() { std::cout.rdbuf(previous_); }
+
+  private:
+    DiscardingStreamBuffer sink_;
+    std::streambuf *previous_;
+};
+
+[[nodiscard]] auto measureVirtualMachine(const ember::bytecode::VerifiedProgram &program,
+                                         ember::semantic::FunctionId entry,
+                                         std::uint64_t iterations)
+    -> std::optional<std::chrono::nanoseconds>
+{
+    auto clone = cloneVerifiedProgram(program);
+    if (!clone)
+        return std::nullopt;
+    const ember::runtime::RuntimeOptions options{
+        .hotThreshold = 0,
+        .jitEnabled = false,
+        .profilingEnabled = false,
+    };
+    auto vm = ember::runtime::VirtualMachine::create(std::move(*clone), options);
+    const auto started = std::chrono::steady_clock::now();
+    for (std::uint64_t iteration{}; iteration < iterations; ++iteration)
+    {
+        if (!executeBenchmarkIteration(vm, entry))
+            return std::nullopt;
+    }
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - started);
+}
+
+[[nodiscard]] auto measureColdJit(const ember::bytecode::VerifiedProgram &program,
+                                  ember::semantic::FunctionId entry, std::uint64_t iterations)
+    -> std::optional<std::chrono::nanoseconds>
+{
+    std::chrono::nanoseconds elapsed{};
+    const ember::runtime::RuntimeOptions options{
+        .hotThreshold = 1,
+        .jitEnabled = true,
+        .profilingEnabled = true,
+    };
+    for (std::uint64_t iteration{}; iteration < iterations; ++iteration)
+    {
+        auto clone = cloneVerifiedProgram(program);
+        if (!clone)
+            return std::nullopt;
+        auto vm = ember::runtime::VirtualMachine::create(std::move(*clone), options);
+        const auto started = std::chrono::steady_clock::now();
+        if (!executeBenchmarkIteration(vm, entry))
+            return std::nullopt;
+        elapsed += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - started);
+    }
+    return elapsed;
+}
+
+[[nodiscard]] auto measureWarmedJit(ember::runtime::VirtualMachine &vm,
+                                    ember::semantic::FunctionId entry, std::uint64_t iterations)
+    -> std::optional<std::chrono::nanoseconds>
+{
+    const auto started = std::chrono::steady_clock::now();
+    for (std::uint64_t iteration{}; iteration < iterations; ++iteration)
+    {
+        if (!executeBenchmarkIteration(vm, entry))
+            return std::nullopt;
+    }
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - started);
+}
+
+void printBenchmarkMeasurement(std::string_view label, std::chrono::nanoseconds elapsed,
+                               std::uint64_t iterations)
+{
+    const auto milliseconds = std::chrono::duration<double, std::milli>{elapsed}.count();
+    const auto millisecondsPerRun = milliseconds / static_cast<double>(iterations);
+    std::cout << label << ": " << milliseconds << " ms total (" << millisecondsPerRun
+              << " ms/run)\n";
+}
+
+[[nodiscard]] int runBenchmark(const PreparedRuntimeProgram &program,
+                               ember::semantic::FunctionId entry,
+                               const BenchmarkOptions &options)
+{
+    const ember::runtime::RuntimeOptions jitOptions{
+        .hotThreshold = 1,
+        .jitEnabled = true,
+        .profilingEnabled = true,
+    };
+    auto warmClone = cloneVerifiedProgram(program.verifiedProgram);
+    if (!warmClone)
+        return 1;
+    auto warmedVm = ember::runtime::VirtualMachine::create(std::move(*warmClone), jitOptions);
+
+    std::optional<std::chrono::nanoseconds> vmElapsed;
+    std::optional<std::chrono::nanoseconds> coldJitElapsed;
+    std::optional<std::chrono::nanoseconds> warmedJitElapsed;
+    {
+        // Existing built-ins use std::cout. Suppress their output so the command's
+        // table remains a stable measurement result rather than N repeated runs.
+        ScopedStandardOutputSilencer silenceProgramOutput;
+        if (!executeBenchmarkIteration(warmedVm, entry))
+            return 1;
+        const auto *entryFunction = warmedVm.function(entry);
+        if (entryFunction == nullptr ||
+            entryFunction->tier() != ember::runtime::ExecutionTier::native)
+        {
+            std::cerr << "error: benchmark requires a native entry function; "
+                         "the baseline JIT is unavailable for this program or platform\n";
+            return 1;
+        }
+
+        vmElapsed = measureVirtualMachine(program.verifiedProgram, entry, options.iterations);
+        coldJitElapsed = measureColdJit(program.verifiedProgram, entry, options.iterations);
+        warmedJitElapsed = measureWarmedJit(warmedVm, entry, options.iterations);
+    }
+    if (!vmElapsed || !coldJitElapsed || !warmedJitElapsed)
+        return 1;
+
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "benchmark: " << program.source.name() << '\n';
+    std::cout << "iterations: " << options.iterations << '\n';
+    printBenchmarkMeasurement("VM", *vmElapsed, options.iterations);
+    printBenchmarkMeasurement("cold JIT (includes native compilation)", *coldJitElapsed,
+                              options.iterations);
+    printBenchmarkMeasurement("warmed JIT", *warmedJitElapsed, options.iterations);
+    std::cout << "note: program stdout is suppressed; these are reference measurements for this machine\n";
+    return 0;
+}
+
+[[nodiscard]] bool isDumpCommand(std::string_view command) noexcept
+{
+    return command == "dump-tokens" || command == "dump-ast" || command == "dump-typed-ast" ||
+           command == "dump-bytecode" || command == "dump-ir" || command == "dump-asm";
+}
+
+void printGeneralUsage(std::ostream &output, std::string_view executable)
+{
+    output << "usage: " << executable << " <command> [options] <file>\n"
+           << "\n"
+           << "commands:\n"
+           << "  run                 execute a program\n"
+           << "  benchmark           measure VM, cold JIT, and warmed JIT execution\n"
+           << "  dump-tokens         print lexer tokens\n"
+           << "  dump-ast            print the syntax tree\n"
+           << "  dump-typed-ast      print the typed syntax tree\n"
+           << "  dump-bytecode       print verified bytecode\n"
+           << "  dump-ir             print optimized IR\n"
+           << "  dump-asm            print baseline native-code listings\n"
+           << "\n"
+           << "global options:\n"
+           << "  --help, help        show help\n"
+           << "  --version           show the version\n"
+           << "\n"
+           << "Run '" << executable << " <command> --help' for command-specific usage.\n";
+}
+
+void printRunUsage(std::ostream &output, std::string_view executable)
+{
+    output << "usage: " << executable
+           << " run [--no-jit] [--jit-threshold=<non-negative-integer>] [--trace-jit] <file>\n"
+           << "\n"
+           << "  --no-jit                         run only in the VM\n"
+           << "  --jit-threshold=<non-negative-integer>  calls before a function becomes hot\n"
+           << "  --trace-jit                      print hot-function transitions to stderr\n";
+}
+
+void printBenchmarkUsage(std::ostream &output, std::string_view executable)
+{
+    output << "usage: " << executable << " benchmark [--iterations=<1-100000>] <file>\n"
+           << "\n"
+           << "Measures VM execution, cold JIT execution including native compilation, and warmed JIT\n"
+           << "execution. Program stdout is suppressed while measuring.\n"
+           << "\n"
+           << "  --iterations=<1-100000>  measurements per execution mode (default: 10)\n";
+}
+
+void printDumpUsage(std::ostream &output, std::string_view executable, std::string_view command)
+{
+    output << "usage: " << executable << ' ' << command << " <file>\n";
+}
+
+[[nodiscard]] bool printCommandHelp(std::ostream &output, std::string_view executable,
+                                    std::string_view command)
+{
+    if (command == "run")
+    {
+        printRunUsage(output, executable);
+        return true;
+    }
+    if (command == "benchmark")
+    {
+        printBenchmarkUsage(output, executable);
+        return true;
+    }
+    if (isDumpCommand(command))
+    {
+        printDumpUsage(output, executable, command);
+        return true;
+    }
+    return false;
+}
+
+void printUsageError(std::string_view executable, std::string_view message)
+{
+    std::cerr << "error: " << message << "\n\n";
+    printGeneralUsage(std::cerr, executable);
+}
+
+[[nodiscard]] std::string unknownOptionError(std::string_view option, std::string_view command)
+{
+    return "unknown option '" + std::string{option} + "' for " + std::string{command};
 }
 
 [[nodiscard]] bool parseHotThreshold(std::string_view text, std::uint64_t &threshold)
@@ -465,13 +767,13 @@ void printUsage(std::string_view executable)
     return true;
 }
 
-[[nodiscard]] std::optional<RunOptions> parseRunOptions(int argumentCount, char *arguments[],
-                                                         std::string_view &path)
+[[nodiscard]] RunOptionsParseResult parseRunOptions(int argumentCount, char *arguments[])
 {
     RunOptions options;
     bool thresholdSpecified{};
     bool traceSpecified{};
     bool noJitSpecified{};
+    std::string_view path;
 
     for (int index = 2; index < argumentCount; ++index)
     {
@@ -479,7 +781,9 @@ void printUsage(std::string_view executable)
         if (argument == "--no-jit")
         {
             if (noJitSpecified)
-                return std::nullopt;
+                return {.options = std::nullopt,
+                        .path = {},
+                        .error = "--no-jit may be specified only once"};
             noJitSpecified = true;
             options.jitEnabled = false;
             continue;
@@ -487,7 +791,9 @@ void printUsage(std::string_view executable)
         if (argument == "--trace-jit")
         {
             if (traceSpecified)
-                return std::nullopt;
+                return {.options = std::nullopt,
+                        .path = {},
+                        .error = "--trace-jit may be specified only once"};
             traceSpecified = true;
             options.traceJit = true;
             continue;
@@ -498,17 +804,82 @@ void printUsage(std::string_view executable)
             if (thresholdSpecified ||
                 !parseHotThreshold(argument.substr(thresholdPrefix.size()), options.hotThreshold))
             {
-                return std::nullopt;
+                return {.options = std::nullopt,
+                        .path = {},
+                        .error = "--jit-threshold must be a non-negative integer and may be specified only once"};
             }
             thresholdSpecified = true;
             continue;
         }
-        if (argument.starts_with("--") || !path.empty())
-            return std::nullopt;
+        if (argument.starts_with("-"))
+        {
+            return {.options = std::nullopt,
+                    .path = {},
+                    .error = unknownOptionError(argument, "run")};
+        }
+        if (!path.empty())
+        {
+            return {.options = std::nullopt,
+                    .path = {},
+                    .error = "run accepts exactly one source file"};
+        }
         path = argument;
     }
 
-    return path.empty() ? std::nullopt : std::optional<RunOptions>{options};
+    if (path.empty())
+    {
+        return {.options = std::nullopt,
+                .path = {},
+                .error = "run requires exactly one source file"};
+    }
+    return {.options = options, .path = path, .error = {}};
+}
+
+[[nodiscard]] BenchmarkOptionsParseResult parseBenchmarkOptions(int argumentCount, char *arguments[])
+{
+    BenchmarkOptions options;
+    bool iterationsSpecified{};
+    std::string_view path;
+
+    for (int index = 2; index < argumentCount; ++index)
+    {
+        const std::string_view argument{arguments[index]};
+        constexpr std::string_view iterationsPrefix{"--iterations="};
+        if (argument.starts_with(iterationsPrefix))
+        {
+            if (iterationsSpecified ||
+                !parseHotThreshold(argument.substr(iterationsPrefix.size()), options.iterations) ||
+                options.iterations == 0 || options.iterations > maximumBenchmarkIterations)
+            {
+                return {.options = std::nullopt,
+                        .path = {},
+                        .error = "--iterations must be an integer from 1 through 100000 and may be specified only once"};
+            }
+            iterationsSpecified = true;
+            continue;
+        }
+        if (argument.starts_with("-"))
+        {
+            return {.options = std::nullopt,
+                    .path = {},
+                    .error = unknownOptionError(argument, "benchmark")};
+        }
+        if (!path.empty())
+        {
+            return {.options = std::nullopt,
+                    .path = {},
+                    .error = "benchmark accepts exactly one source file"};
+        }
+        path = argument;
+    }
+
+    if (path.empty())
+    {
+        return {.options = std::nullopt,
+                .path = {},
+                .error = "benchmark requires exactly one source file"};
+    }
+    return {.options = options, .path = path, .error = {}};
 }
 
 } // namespace
@@ -517,39 +888,103 @@ int main(int argumentCount, char *arguments[])
 {
     if (argumentCount == 1)
     {
-        std::cout << "EmberJIT 0.1.0\n";
+        printGeneralUsage(std::cout, arguments[0]);
         return 0;
     }
 
-    if (argumentCount >= 3 && std::string_view{arguments[1]} == "run")
+    const std::string_view command{arguments[1]};
+    if (command == "--version")
     {
-        std::string_view path;
-        const auto options = parseRunOptions(argumentCount, arguments, path);
-        if (!options)
+        if (argumentCount != 2)
         {
-            printUsage(arguments[0]);
+            printUsageError(arguments[0], "--version does not accept arguments");
+            return 2;
+        }
+        std::cout << "EmberJIT 0.1.0\n";
+        return 0;
+    }
+    if (command == "--help" || command == "help")
+    {
+        if (argumentCount == 2)
+        {
+            printGeneralUsage(std::cout, arguments[0]);
+            return 0;
+        }
+        if (argumentCount == 3 && command == "help" &&
+            printCommandHelp(std::cout, arguments[0], arguments[2]))
+        {
+            return 0;
+        }
+        printUsageError(arguments[0], "help accepts at most one known command");
+        return 2;
+    }
+    if (argumentCount == 3 && std::string_view{arguments[2]} == "--help")
+    {
+        if (printCommandHelp(std::cout, arguments[0], command))
+            return 0;
+        printUsageError(arguments[0], "unknown command");
+        return 2;
+    }
+
+    if (command == "run")
+    {
+        const auto parsed = parseRunOptions(argumentCount, arguments);
+        if (!parsed.options)
+        {
+            printUsageError(arguments[0], parsed.error);
             return 2;
         }
         std::string contents;
-        if (!readFile(path, contents))
+        if (!readFile(parsed.path, contents))
         {
-            std::cerr << "error: unable to read source file '" << path << "'\n";
+            std::cerr << "error: unable to read source file '" << parsed.path << "'\n";
             return 1;
         }
-        return runVm(path, std::move(contents), *options);
+        auto program = prepareRuntimeProgram(parsed.path, std::move(contents));
+        if (!program)
+            return 1;
+        const auto entry = findCliEntryPoint(parsed.path, *program);
+        if (!entry)
+            return 1;
+        return runVm(std::move(*program), *entry, *parsed.options);
     }
-    if (argumentCount == 3)
+    if (command == "benchmark")
     {
-        const std::string_view command{arguments[1]};
-        if (command != "dump-tokens" && command != "dump-ast" && command != "dump-typed-ast" &&
-            command != "dump-bytecode" && command != "dump-ir" && command != "dump-asm")
+        const auto parsed = parseBenchmarkOptions(argumentCount, arguments);
+        if (!parsed.options)
         {
-            printUsage(arguments[0]);
+            printUsageError(arguments[0], parsed.error);
+            return 2;
+        }
+        std::string contents;
+        if (!readFile(parsed.path, contents))
+        {
+            std::cerr << "error: unable to read source file '" << parsed.path << "'\n";
+            return 1;
+        }
+        const auto program = prepareRuntimeProgram(parsed.path, std::move(contents));
+        if (!program)
+            return 1;
+        const auto entry = findCliEntryPoint(parsed.path, *program);
+        if (!entry)
+            return 1;
+        return runBenchmark(*program, *entry, *parsed.options);
+    }
+    if (isDumpCommand(command))
+    {
+        if (argumentCount != 3)
+        {
+            printUsageError(arguments[0], "inspection commands require exactly one source file");
             return 2;
         }
 
         std::string contents;
         const std::string_view path{arguments[2]};
+        if (path.starts_with("-"))
+        {
+            printUsageError(arguments[0], unknownOptionError(path, command));
+            return 2;
+        }
         if (!readFile(path, contents))
         {
             std::cerr << "error: unable to read source file '" << path << "'\n";
@@ -576,6 +1011,6 @@ int main(int argumentCount, char *arguments[])
             return dumpAsm(path, std::move(contents));
     }
 
-    printUsage(arguments[0]);
+    printUsageError(arguments[0], "unknown command");
     return 2;
 }
