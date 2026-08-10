@@ -307,6 +307,38 @@ if(BUILD_TESTING)
     )
 
     add_test(
+        NAME ember_cli_contract
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -P ${ember_test_script_directory}/assert_cli_contract.cmake
+    )
+
+    add_test(
+        NAME ember_cli_usage_errors
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DSOURCE_FILE=${ember_vm_runtime_fixture}
+            -P ${ember_test_script_directory}/assert_cli_usage_errors.cmake
+    )
+
+    add_test(
+        NAME ember_cli_missing_source
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -P ${ember_test_script_directory}/assert_cli_missing_source.cmake
+    )
+
+    if(WIN32)
+        add_test(
+            NAME ember_benchmark
+            COMMAND ${CMAKE_COMMAND}
+                -DEMBER=$<TARGET_FILE:ember>
+                -DSOURCE_FILE=${ember_example_directory}/vm_hot_loop.ember
+                -P ${ember_test_script_directory}/assert_benchmark_output.cmake
+        )
+    endif()
+
+    add_test(
         NAME ember_run_vm
         COMMAND ${CMAKE_COMMAND}
             -DEMBER=$<TARGET_FILE:ember>
@@ -416,7 +448,7 @@ if(BUILD_TESTING)
     )
 
     set_tests_properties(ember_smoke PROPERTIES
-        PASS_REGULAR_EXPRESSION "EmberJIT 0\\.1\\.0"
+        PASS_REGULAR_EXPRESSION "usage: .*<command> \\[options\\] <file>"
     )
 
 endif()

@@ -13,18 +13,17 @@ if(NOT "${standard_output}" STREQUAL "")
     message(FATAL_ERROR "Unknown command wrote stdout: '${standard_output}'.")
 endif()
 
-string(CONCAT dump_usage_pattern
-    "usage: .*<dump-tokens\\|dump-ast\\|dump-typed-ast\\|dump-bytecode"
-    "\\|dump-ir\\|dump-asm> <file>"
-)
-if(NOT standard_error MATCHES "${dump_usage_pattern}")
+if(NOT standard_error MATCHES "^error: unknown command")
+    message(FATAL_ERROR
+        "Unknown command did not report its cause: '${standard_error}'."
+    )
+endif()
+
+if(NOT standard_error MATCHES
+   "usage: .*<command> \\[options\\] <file>")
     message(FATAL_ERROR "Unexpected usage output: '${standard_error}'.")
 endif()
 
-string(CONCAT run_usage_pattern
-    "run \\[--no-jit\\] \\[--jit-threshold=<non-negative-integer>\\] "
-    "\\[--trace-jit\\] <file>"
-)
-if(NOT standard_error MATCHES "${run_usage_pattern}")
-    message(FATAL_ERROR "Unexpected usage output: '${standard_error}'.")
+if(NOT standard_error MATCHES "benchmark")
+    message(FATAL_ERROR "General usage omitted benchmark: '${standard_error}'.")
 endif()
