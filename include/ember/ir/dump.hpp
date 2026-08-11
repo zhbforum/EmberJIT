@@ -4,7 +4,6 @@
 
 #include <string>
 
-namespace ember::ir
-{
-[[nodiscard]] std::string dump(const VerifiedFunction &function);
+namespace ember::ir {
+[[nodiscard]] std::string dump(const VerifiedFunction& function);
 } // namespace ember::ir

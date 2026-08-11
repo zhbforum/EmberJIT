@@ -6,25 +6,21 @@
 #include <variant>
 #include <vector>
 
-namespace ember::frontend
-{
+namespace ember::frontend {
 
-enum class TypeName
-{
+enum class TypeName {
     i64,
     f64,
     boolean,
     voidType,
 };
 
-enum class UnaryOperator
-{
+enum class UnaryOperator {
     plus,
     minus,
 };
 
-enum class BinaryOperator
-{
+enum class BinaryOperator {
     add,
     subtract,
     multiply,
@@ -46,112 +42,104 @@ using ExpressionPtr = std::unique_ptr<Expression>;
 using StatementPtr = std::unique_ptr<Statement>;
 using BlockPtr = std::unique_ptr<Block>;
 
-struct IdentifierExpression
-{
+struct IdentifierExpression {
     support::SourceSpan nameSpan;
 };
 
-struct LiteralExpression
-{
+struct LiteralExpression {
     TokenKind kind;
     support::SourceSpan literalSpan;
 };
 
-struct UnaryExpression
-{
+struct UnaryExpression {
     UnaryOperator operation;
     support::SourceSpan operatorSpan;
     ExpressionPtr operand;
 };
 
-struct BinaryExpression
-{
+struct BinaryExpression {
     BinaryOperator operation;
     support::SourceSpan operatorSpan;
     ExpressionPtr left;
     ExpressionPtr right;
 };
 
-struct CallExpression
-{
+struct CallExpression {
     ExpressionPtr callee;
     std::vector<ExpressionPtr> arguments;
 };
 
-struct ParenthesizedExpression
-{
+struct ParenthesizedExpression {
     ExpressionPtr expression;
 };
 
-struct Expression
-{
+struct Expression {
     support::SourceSpan span;
-    std::variant<IdentifierExpression, LiteralExpression, UnaryExpression,
-                 BinaryExpression, CallExpression, ParenthesizedExpression>
+    std::variant<IdentifierExpression,
+                 LiteralExpression,
+                 UnaryExpression,
+                 BinaryExpression,
+                 CallExpression,
+                 ParenthesizedExpression>
         node;
 };
 
-struct LetStatement
-{
+struct LetStatement {
     support::SourceSpan nameSpan;
     support::SourceSpan typeSpan;
     TypeName type;
     ExpressionPtr initializer;
 };
 
-struct AssignmentStatement
-{
+struct AssignmentStatement {
     support::SourceSpan targetSpan;
     ExpressionPtr value;
 };
 
-struct ReturnStatement
-{
+struct ReturnStatement {
     ExpressionPtr value;
 };
 
-struct IfStatement
-{
+struct IfStatement {
     ExpressionPtr condition;
     BlockPtr thenBlock;
     StatementPtr elseBranch;
 };
 
-struct WhileStatement
-{
+struct WhileStatement {
     ExpressionPtr condition;
     BlockPtr body;
 };
 
-struct ExpressionStatement
-{
+struct ExpressionStatement {
     ExpressionPtr expression;
 };
 
-struct Statement
-{
+struct Statement {
     support::SourceSpan span;
-    std::variant<LetStatement, AssignmentStatement, ReturnStatement,
-                 IfStatement, WhileStatement, ExpressionStatement, BlockPtr>
+    std::variant<LetStatement,
+                 AssignmentStatement,
+                 ReturnStatement,
+                 IfStatement,
+                 WhileStatement,
+                 ExpressionStatement,
+                 BlockPtr>
         node;
 };
 
-struct Block
-{
+struct Block {
     support::SourceSpan span;
     std::vector<Statement> statements;
 };
 
-struct Parameter
-{
+struct Parameter {
     support::SourceSpan span;
     support::SourceSpan nameSpan;
     support::SourceSpan typeSpan;
     TypeName type;
 };
 
-struct FunctionDeclaration
-{
+struct FunctionDeclaration {
     support::SourceSpan span;
     support::SourceSpan nameSpan;
     std::vector<Parameter> parameters;
@@ -160,8 +148,7 @@ struct FunctionDeclaration
     Block body;
 };
 
-struct Program
-{
+struct Program {
     support::SourceSpan span;
     std::vector<FunctionDeclaration> functions;
 };

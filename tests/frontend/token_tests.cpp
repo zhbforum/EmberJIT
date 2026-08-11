@@ -5,8 +5,7 @@
 #include <array>
 #include <type_traits>
 
-namespace
-{
+namespace {
 
 using ember::frontend::Token;
 using ember::frontend::TokenKind;
@@ -16,10 +15,8 @@ using ember::support::SourceSpan;
 
 static_assert(std::is_trivially_copyable_v<Token>);
 
-EMBER_TEST("token kind names are stable")
-{
-    struct TokenKindCase
-    {
+EMBER_TEST("token kind names are stable") {
+    struct TokenKindCase {
         TokenKind kind;
         std::string_view expectedName;
     };
@@ -66,24 +63,20 @@ EMBER_TEST("token kind names are stable")
         TokenKindCase{TokenKind::arrow, "->"},
     };
 
-    for (const auto &testCase : cases)
-    {
+    for (const auto& testCase : cases) {
         tests.expect(tokenKindName(testCase.kind) == testCase.expectedName,
                      "token kind has its documented stable name");
     }
 }
 
-EMBER_TEST("token preserves kind and source span")
-{
+EMBER_TEST("token preserves kind and source span") {
     constexpr Token token{
         .kind = TokenKind::keywordReturn,
         .span = SourceSpan{.source = SourceId{21}, .begin = 8, .end = 14},
     };
 
-    tests.expect(token.kind == TokenKind::keywordReturn,
-                 "token preserves its kind");
-    tests.expect(token.span ==
-                     SourceSpan{.source = SourceId{21}, .begin = 8, .end = 14},
+    tests.expect(token.kind == TokenKind::keywordReturn, "token preserves its kind");
+    tests.expect(token.span == SourceSpan{.source = SourceId{21}, .begin = 8, .end = 14},
                  "token preserves its source span");
 }
 

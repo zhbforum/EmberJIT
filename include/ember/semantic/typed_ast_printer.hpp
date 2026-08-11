@@ -5,12 +5,10 @@
 
 #include <string>
 
-namespace ember::semantic
-{
-class TypedAstPrinter
-{
-  public:
-    [[nodiscard]] std::string print(const TypedProgram &program,
-                                    const support::SourceText &source) const;
+namespace ember::semantic {
+class TypedAstPrinter {
+public:
+    [[nodiscard]] std::string print(const TypedProgram& program,
+                                    const support::SourceText& source) const;
 };
 } // namespace ember::semantic

@@ -7,16 +7,13 @@
 #include <span>
 #include <vector>
 
-namespace ember::runtime
-{
-struct HotFunctionEvent
-{
+namespace ember::runtime {
+struct HotFunctionEvent {
     semantic::FunctionId functionId;
     std::uint64_t invocationCount;
 };
 
-struct RuntimeOptions
-{
+struct RuntimeOptions {
     // Zero records invocations but disables hot-state transitions.
     std::uint64_t hotThreshold{1000};
     // --no-jit disables compilation and native dispatch, not profiling.
@@ -26,6 +23,9 @@ struct RuntimeOptions
     // Test-only fault injection. It proves failed compilation leaves the VM
     // entry point intact; no command-line option exposes this behavior.
     bool forceNativeCompilationFailureForTesting{};
+    // Test-only lifecycle failpoint. It is intentionally unavailable to the
+    // CLI and lets hardening tests inspect cleanup before native publication.
+    NativeCompilationFailpoint nativeCompilationFailpointForTesting{};
     // Test-only seam for VM/unoptimized-native/optimized-native differential
     // tests. Production dispatch always enables the optimization pipeline.
     bool disableOptimizationForTesting{};
@@ -34,30 +34,30 @@ struct RuntimeOptions
     bool forceNativeCallFailureForTesting{};
 };
 
-struct DispatchDecision
-{
-    const RuntimeFunction *function;
+struct DispatchDecision {
+    const RuntimeFunction* function;
     ExecutionTier tier;
     bool becameHot;
 };
 
 // This is the common call contract for VM and future native callers. It does
 // not create VM frames and never invokes user-provided code.
-class RuntimeDispatcher
-{
-  public:
-    RuntimeDispatcher(RuntimeFunctionTable &functions, RuntimeOptions options,
-                      std::vector<HotFunctionEvent> &events)
-        : functions_(functions), options_(options), events_(events)
-    {
+class RuntimeDispatcher {
+public:
+    RuntimeDispatcher(RuntimeFunctionTable& functions,
+                      RuntimeOptions options,
+                      std::vector<HotFunctionEvent>& events)
+        : functions_(functions),
+          options_(options),
+          events_(events) {
     }
 
     [[nodiscard]] std::optional<DispatchDecision>
     dispatch(semantic::FunctionId functionId, std::span<const bytecode::Value> arguments);
 
-  private:
-    RuntimeFunctionTable &functions_;
+private:
+    RuntimeFunctionTable& functions_;
     RuntimeOptions options_;
-    std::vector<HotFunctionEvent> &events_;
+    std::vector<HotFunctionEvent>& events_;
 };
 } // namespace ember::runtime

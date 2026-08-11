@@ -13,10 +13,7 @@ namespace ember::support {
 
 class SourceText {
 public:
-    SourceText(
-        SourceId id,
-        std::string name,
-        std::string contents);
+    SourceText(SourceId id, std::string name, std::string contents);
 
     [[nodiscard]] SourceId id() const noexcept;
     [[nodiscard]] std::string_view name() const noexcept;
@@ -29,7 +26,7 @@ public:
     [[nodiscard]] std::optional<SourceLocation> locationAt(std::size_t offset) const noexcept;
 
 private:
-    SourceId id_ {};
+    SourceId id_{};
     std::string name_;
     std::string contents_;
     std::vector<std::size_t> lineStarts_;

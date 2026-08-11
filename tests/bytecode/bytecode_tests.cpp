@@ -1,25 +1,23 @@
-#include "ember/bytecode/bytecode.hpp"
 #include "ember/bytecode/builtins.hpp"
+#include "ember/bytecode/bytecode.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
 #include "ember/runtime/vm.hpp"
 #include "ember/semantic/analyzer.hpp"
+
 #include "test_harness.hpp"
 
 #include <algorithm>
 #include <string>
 
-namespace
-{
-struct CompiledProgram
-{
+namespace {
+struct CompiledProgram {
     ember::bytecode::CompileResult compilation;
     ember::semantic::FunctionId mainId{};
 };
 
-[[nodiscard]] auto compile(std::string code, bool registerRuntimeBuiltins = false)
-    -> CompiledProgram
-{
+[[nodiscard]] auto compile(std::string code,
+                           bool registerRuntimeBuiltins = false) -> CompiledProgram {
     ember::support::SourceText source{ember::support::SourceId{90}, "vm.ember", std::move(code)};
     const auto tokens = ember::frontend::Lexer{}.lex(source);
     if (!tokens.diagnostics.empty())
@@ -36,9 +34,9 @@ struct CompiledProgram
         return CompiledProgram{};
 
     const auto main = std::find_if(
-        typed.program->functions.begin(), typed.program->functions.end(),
-        [](const auto &function)
-        {
+        typed.program->functions.begin(),
+        typed.program->functions.end(),
+        [](const auto& function) {
             return function.kind == ember::semantic::FunctionKind::user && function.name == "main";
         });
     if (main == typed.program->functions.end())
@@ -46,8 +44,7 @@ struct CompiledProgram
 
     return {.compilation = ember::bytecode::Compiler{}.compile(*typed.program), .mainId = main->id};
 }
-EMBER_TEST("bytecode lowers loops and VM executes i64 arithmetic")
-{
+EMBER_TEST("bytecode lowers loops and VM executes i64 arithmetic") {
     auto compiled = compile("fn main() -> i64 { let n: i64 = 5; let r: i64 = 1; while n > 1 { "
                             "r = r * n; n = n - 1; } return r; }");
     tests.expect(compiled.compilation.program.has_value(), "typed program lowers");
@@ -59,16 +56,15 @@ EMBER_TEST("bytecode lowers loops and VM executes i64 arithmetic")
         return;
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId);
-    tests.expect(result.result.value.has_value() && std::get<std::int64_t>(*result.result.value) == 120,
+    tests.expect(result.result.value.has_value() &&
+                     std::get<std::int64_t>(*result.result.value) == 120,
                  "factorial executes");
 }
-EMBER_TEST("VM uses explicit frames for recursive calls")
-{
+EMBER_TEST("VM uses explicit frames for recursive calls") {
     auto compiled = compile(
         "fn fact(n: i64) -> i64 { if n == 0 { return 1; } else { return n * fact(n - 1); } } "
         "fn main() -> i64 { return fact(8); }");
-    if (!compiled.compilation.program)
-    {
+    if (!compiled.compilation.program) {
         tests.expect(false, "recursive typed program lowers");
         return;
     }
@@ -78,11 +74,11 @@ EMBER_TEST("VM uses explicit frames for recursive calls")
         return;
     auto vm = ember::runtime::VirtualMachine::create(std::move(*verified.program));
     const auto result = vm.execute(compiled.mainId);
-    tests.expect(result.result.value.has_value() && std::get<std::int64_t>(*result.result.value) == 40320,
+    tests.expect(result.result.value.has_value() &&
+                     std::get<std::int64_t>(*result.result.value) == 40320,
                  "recursive function executes through VM frames");
 }
-EMBER_TEST("verifier rejects malformed jump before VM construction")
-{
+EMBER_TEST("verifier rejects malformed jump before VM construction") {
     ember::bytecode::Program program{
         .functions = {
             {.id = 0,
@@ -96,17 +92,14 @@ EMBER_TEST("verifier rejects malformed jump before VM construction")
     tests.expect(!verified.program.has_value() && !verified.diagnostics.empty(),
                  "bad jump is rejected");
 }
-EMBER_TEST("bytecode dump uses stable symbolic instructions and constants")
-{
+EMBER_TEST("bytecode dump uses stable symbolic instructions and constants") {
     auto compiled = compile("fn main() -> i64 { return 42; }");
-    if (!compiled.compilation.program)
-    {
+    if (!compiled.compilation.program) {
         tests.expect(false, "golden typed program lowers");
         return;
     }
     auto verified = ember::bytecode::Verifier{}.verify(std::move(*compiled.compilation.program));
-    if (!verified.program)
-    {
+    if (!verified.program) {
         tests.expect(false, "golden bytecode verifies");
         return;
     }
@@ -117,17 +110,14 @@ EMBER_TEST("bytecode dump uses stable symbolic instructions and constants")
                          "  0002  return\n",
                  "dump is a stable golden representation");
 }
-EMBER_TEST("VM reports integer division runtime errors")
-{
+EMBER_TEST("VM reports integer division runtime errors") {
     auto compiled = compile("fn main() -> i64 { return 1 / 0; }");
-    if (!compiled.compilation.program)
-    {
+    if (!compiled.compilation.program) {
         tests.expect(false, "division typed program lowers");
         return;
     }
     auto verified = ember::bytecode::Verifier{}.verify(std::move(*compiled.compilation.program));
-    if (!verified.program)
-    {
+    if (!verified.program) {
         tests.expect(false, "division bytecode verifies");
         return;
     }
@@ -136,42 +126,37 @@ EMBER_TEST("VM reports integer division runtime errors")
     tests.expect(result.result.error.has_value() && result.result.error->code == "R5004",
                  "division by zero is a runtime error");
 
-    auto overflowCompiled =
-        compile("fn main() -> i64 { return -9223372036854775808 / -1; }");
-    if (!overflowCompiled.compilation.program)
-    {
+    auto overflowCompiled = compile("fn main() -> i64 { return -9223372036854775808 / -1; }");
+    if (!overflowCompiled.compilation.program) {
         tests.expect(false, "INT64_MIN division program lowers");
         return;
     }
     auto overflowVerified =
         ember::bytecode::Verifier{}.verify(std::move(*overflowCompiled.compilation.program));
-    if (!overflowVerified.program)
-    {
+    if (!overflowVerified.program) {
         tests.expect(false, "INT64_MIN division bytecode verifies");
         return;
     }
     auto overflowVm = ember::runtime::VirtualMachine::create(std::move(*overflowVerified.program));
     const auto overflowResult = overflowVm.execute(overflowCompiled.mainId);
-    tests.expect(overflowResult.result.error.has_value() && overflowResult.result.error->code == "R5004",
+    tests.expect(overflowResult.result.error.has_value() &&
+                     overflowResult.result.error->code == "R5004",
                  "INT64_MIN divided by minus one is a runtime error");
 }
 
-EMBER_TEST("VM executes f64, bool, and void functions")
-{
-    auto compiled = compile(
-        "fn half(value: f64) -> f64 { if value > 0.0 { return -value / 2.0; } "
-        "else { return value; } } "
-        "fn observe(value: bool) -> void { if value { return; } return; } "
-        "fn main() -> i64 { let result: f64 = half(3.5); observe(result == -1.75); "
-        "if result == -1.75 { return 1; } else { return 0; } }");
-    if (!compiled.compilation.program)
-    {
+EMBER_TEST("VM executes f64, bool, and void functions") {
+    auto compiled =
+        compile("fn half(value: f64) -> f64 { if value > 0.0 { return -value / 2.0; } "
+                "else { return value; } } "
+                "fn observe(value: bool) -> void { if value { return; } return; } "
+                "fn main() -> i64 { let result: f64 = half(3.5); observe(result == -1.75); "
+                "if result == -1.75 { return 1; } else { return 0; } }");
+    if (!compiled.compilation.program) {
         tests.expect(false, "typed program with f64, bool, and void lowers");
         return;
     }
     auto verified = ember::bytecode::Verifier{}.verify(std::move(*compiled.compilation.program));
-    if (!verified.program)
-    {
+    if (!verified.program) {
         tests.expect(false, "typed program with f64, bool, and void verifies");
         return;
     }
@@ -184,17 +169,14 @@ EMBER_TEST("VM executes f64, bool, and void functions")
                  "f64 arithmetic and boolean branch produce the expected result");
 }
 
-EMBER_TEST("VM executes registered clock builtin")
-{
+EMBER_TEST("VM executes registered clock builtin") {
     auto compiled = compile("fn main() -> i64 { return clock_ms(); }", true);
-    if (!compiled.compilation.program)
-    {
+    if (!compiled.compilation.program) {
         tests.expect(false, "program using clock builtin lowers");
         return;
     }
     auto verified = ember::bytecode::Verifier{}.verify(std::move(*compiled.compilation.program));
-    if (!verified.program)
-    {
+    if (!verified.program) {
         tests.expect(false, "program using clock builtin verifies");
         return;
     }
@@ -206,17 +188,14 @@ EMBER_TEST("VM executes registered clock builtin")
                  "clock builtin returns an i64 value");
 }
 
-EMBER_TEST("VM validates its public entry-point arguments")
-{
+EMBER_TEST("VM validates its public entry-point arguments") {
     auto compiled = compile("fn main(value: i64) -> i64 { return value; }");
-    if (!compiled.compilation.program)
-    {
+    if (!compiled.compilation.program) {
         tests.expect(false, "entry-argument program lowers");
         return;
     }
     auto verified = ember::bytecode::Verifier{}.verify(std::move(*compiled.compilation.program));
-    if (!verified.program)
-    {
+    if (!verified.program) {
         tests.expect(false, "entry-argument program verifies");
         return;
     }
@@ -226,8 +205,7 @@ EMBER_TEST("VM validates its public entry-point arguments")
                  "invalid entry arguments are a runtime error");
 }
 
-EMBER_TEST("verifier preserves unary and boolean opcode semantics")
-{
+EMBER_TEST("verifier preserves unary and boolean opcode semantics") {
     ember::bytecode::Program unary{
         .functions = {
             {.id = 0,
@@ -255,8 +233,7 @@ EMBER_TEST("verifier preserves unary and boolean opcode semantics")
                  "i64 unary negation executes");
 
     auto boolean = compile("fn main() -> bool { return true == false; }");
-    if (!boolean.compilation.program)
-    {
+    if (!boolean.compilation.program) {
         tests.expect(false, "boolean typed program lowers");
         return;
     }
@@ -265,8 +242,7 @@ EMBER_TEST("verifier preserves unary and boolean opcode semantics")
     tests.expect(booleanVerified.program.has_value(), "bool equality verifies as bool opcode");
 }
 
-EMBER_TEST("verifier validates binary operand and result types")
-{
+EMBER_TEST("verifier validates binary operand and result types") {
     using ember::bytecode::Instruction;
     using ember::bytecode::Opcode;
     using ember::bytecode::Program;
@@ -274,42 +250,32 @@ EMBER_TEST("verifier validates binary operand and result types")
     using ember::semantic::FunctionKind;
     using ember::semantic::Type;
 
-    const auto makeFunction = [](Type returnType,
-                                 std::vector<Instruction> code)
-    {
-        return Program{
-            .functions = {{.id = 0,
-                           .kind = FunctionKind::user,
-                           .signature = {.parameterTypes = {},
-                                         .returnType = returnType},
-                           .localCount = 0,
-                           .localTypes = {},
-                           .code = std::move(code)}}};
+    const auto makeFunction = [](Type returnType, std::vector<Instruction> code) {
+        return Program{.functions = {{.id = 0,
+                                      .kind = FunctionKind::user,
+                                      .signature = {.parameterTypes = {}, .returnType = returnType},
+                                      .localCount = 0,
+                                      .localTypes = {},
+                                      .code = std::move(code)}}};
     };
-    const auto verify = [&makeFunction](Type returnType,
-                                        std::vector<Instruction> code)
-    {
-        return ember::bytecode::Verifier{}.verify(
-            makeFunction(returnType, std::move(code)));
+    const auto verify = [&makeFunction](Type returnType, std::vector<Instruction> code) {
+        return ember::bytecode::Verifier{}.verify(makeFunction(returnType, std::move(code)));
     };
-    const auto constantI64 = [](std::int64_t value)
-    {
+    const auto constantI64 = [](std::int64_t value) {
         return Instruction{
             .opcode = Opcode::constant,
             .operand = 0,
             .value = Value{value},
         };
     };
-    const auto constantBool = [](bool value)
-    {
+    const auto constantBool = [](bool value) {
         return Instruction{
             .opcode = Opcode::constant,
             .operand = 0,
             .value = Value{value},
         };
     };
-    const auto operation = [](Opcode opcode)
-    {
+    const auto operation = [](Opcode opcode) {
         return Instruction{
             .opcode = opcode,
             .operand = 0,
@@ -317,37 +283,35 @@ EMBER_TEST("verifier validates binary operand and result types")
         };
     };
 
-    const auto oneOperand = verify(
-        Type::voidType,
-        {constantI64(1), operation(Opcode::addI64),
-         operation(Opcode::returnVoid)});
-    tests.expect(!oneOperand.program.has_value(),
-                 "add.i64 rejects one operand instead of two");
+    const auto oneOperand =
+        verify(Type::voidType,
+               {constantI64(1), operation(Opcode::addI64), operation(Opcode::returnVoid)});
+    tests.expect(!oneOperand.program.has_value(), "add.i64 rejects one operand instead of two");
 
-    const auto mismatchedOperands = verify(
-        Type::voidType,
-        {constantBool(true), constantI64(1), operation(Opcode::addI64),
-         operation(Opcode::returnVoid)});
+    const auto mismatchedOperands = verify(Type::voidType,
+                                           {constantBool(true),
+                                            constantI64(1),
+                                            operation(Opcode::addI64),
+                                            operation(Opcode::returnVoid)});
     tests.expect(!mismatchedOperands.program.has_value(),
                  "add.i64 rejects a mismatched second operand");
 
-    const auto addition = verify(
-        Type::i64,
-        {constantI64(1), constantI64(2), operation(Opcode::addI64),
-         operation(Opcode::returnValue)});
-    tests.expect(addition.program.has_value(),
-                 "add.i64 produces an i64 result");
+    const auto addition = verify(Type::i64,
+                                 {constantI64(1),
+                                  constantI64(2),
+                                  operation(Opcode::addI64),
+                                  operation(Opcode::returnValue)});
+    tests.expect(addition.program.has_value(), "add.i64 produces an i64 result");
 
-    const auto comparison = verify(
-        Type::boolean,
-        {constantI64(1), constantI64(2), operation(Opcode::lessI64),
-         operation(Opcode::returnValue)});
-    tests.expect(comparison.program.has_value(),
-                 "less.i64 produces a bool result");
+    const auto comparison = verify(Type::boolean,
+                                   {constantI64(1),
+                                    constantI64(2),
+                                    operation(Opcode::lessI64),
+                                    operation(Opcode::returnValue)});
+    tests.expect(comparison.program.has_value(), "less.i64 produces a bool result");
 }
 
-EMBER_TEST("verifier rejects unsafe local layouts and malformed opcodes")
-{
+EMBER_TEST("verifier rejects unsafe local layouts and malformed opcodes") {
     const ember::bytecode::Function unsafeLocal{
         .id = 0,
         .kind = ember::semantic::FunctionKind::user,
@@ -391,22 +355,21 @@ EMBER_TEST("verifier rejects unsafe local layouts and malformed opcodes")
     tests.expect(!uninitializedResult.program.has_value(), "uninitialized local load is rejected");
 }
 
-EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructions")
-{
+EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructions") {
     using ember::bytecode::Instruction;
     using ember::bytecode::Opcode;
     using ember::bytecode::Program;
     using ember::semantic::FunctionKind;
     using ember::semantic::Type;
 
-    const auto makeFunction = [](std::vector<Instruction> code)
-    {
-        return Program{.functions = {{.id = 0,
-                                     .kind = FunctionKind::user,
-                                     .signature = {.parameterTypes = {}, .returnType = Type::voidType},
-                                     .localCount = 0,
-                                     .localTypes = {},
-                                     .code = std::move(code)}}};
+    const auto makeFunction = [](std::vector<Instruction> code) {
+        return Program{
+            .functions = {{.id = 0,
+                           .kind = FunctionKind::user,
+                           .signature = {.parameterTypes = {}, .returnType = Type::voidType},
+                           .localCount = 0,
+                           .localTypes = {},
+                           .code = std::move(code)}}};
     };
 
     const auto incompatibleMerge = ember::bytecode::Verifier{}.verify(makeFunction(
@@ -428,11 +391,10 @@ EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructio
              .signature = {.parameterTypes = {}, .returnType = Type::voidType},
              .localCount = 0,
              .localTypes = {},
-             .code = {{.opcode = Opcode::constant,
-                       .operand = 0,
-                       .value = ember::bytecode::Value{true}},
-                      {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
-                      {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}},
+             .code =
+                 {{.opcode = Opcode::constant, .operand = 0, .value = ember::bytecode::Value{true}},
+                  {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
+                  {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}},
             {.id = 1,
              .kind = FunctionKind::user,
              .signature = {.parameterTypes = {Type::i64}, .returnType = Type::voidType},
@@ -441,21 +403,20 @@ EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructio
              .code = {{.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}},
         }};
     const auto invalidCall = ember::bytecode::Verifier{}.verify(std::move(malformedCall));
-    tests.expect(!invalidCall.program.has_value(), "call arguments with the wrong type are rejected");
+    tests.expect(!invalidCall.program.has_value(),
+                 "call arguments with the wrong type are rejected");
 
-    const auto invalidUnreachable = ember::bytecode::Verifier{}.verify(makeFunction(
-        {{.opcode = Opcode::jump, .operand = 2, .value = std::nullopt},
-         {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-         {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}));
+    const auto invalidUnreachable = ember::bytecode::Verifier{}.verify(
+        makeFunction({{.opcode = Opcode::jump, .operand = 2, .value = std::nullopt},
+                      {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}));
     tests.expect(!invalidUnreachable.program.has_value(),
                  "unreachable instructions must still be well-formed");
 }
 
-EMBER_TEST("verifier rejects invalid returns, kinds, types, and host payloads")
-{
-    const auto makeFunction =
-        [](ember::semantic::Type returnType, std::vector<ember::bytecode::Instruction> code)
-    {
+EMBER_TEST("verifier rejects invalid returns, kinds, types, and host payloads") {
+    const auto makeFunction = [](ember::semantic::Type returnType,
+                                 std::vector<ember::bytecode::Instruction> code) {
         return ember::bytecode::Program{
             .functions = {{.id = 0,
                            .kind = ember::semantic::FunctionKind::user,
@@ -520,8 +481,7 @@ EMBER_TEST("verifier rejects invalid returns, kinds, types, and host payloads")
                  "host payload is rejected");
 }
 
-EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero")
-{
+EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero") {
     ember::bytecode::Program recursion{
         .functions = {
             {.id = 0,
@@ -535,8 +495,7 @@ EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero")
                   .operand = 0,
                   .value = std::nullopt}}}}};
     auto recursiveVerified = ember::bytecode::Verifier{}.verify(std::move(recursion));
-    if (!recursiveVerified.program)
-    {
+    if (!recursiveVerified.program) {
         tests.expect(false, "recursive frame-limit bytecode verifies");
         return;
     }
@@ -578,8 +537,7 @@ EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero")
                   .operand = 0,
                   .value = std::nullopt}}}}};
     auto targetZeroVerified = ember::bytecode::Verifier{}.verify(std::move(targetZero));
-    if (!targetZeroVerified.program)
-    {
+    if (!targetZeroVerified.program) {
         tests.expect(false, "target-zero bytecode verifies");
         return;
     }

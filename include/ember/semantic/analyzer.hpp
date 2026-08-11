@@ -7,40 +7,34 @@
 #include <string>
 #include <vector>
 
-namespace ember::semantic
-{
+namespace ember::semantic {
 
-struct HostFunction
-{
+struct HostFunction {
     std::string name;
     FunctionSignature signature;
 };
 
-class HostFunctionRegistry
-{
-  public:
+class HostFunctionRegistry {
+public:
     [[nodiscard]] bool add(HostFunction function);
-    [[nodiscard]] const std::vector<HostFunction> &functions() const noexcept
-    {
+    [[nodiscard]] const std::vector<HostFunction>& functions() const noexcept {
         return functions_;
     }
 
-  private:
+private:
     std::vector<HostFunction> functions_;
 };
 
-struct AnalysisResult
-{
+struct AnalysisResult {
     std::unique_ptr<TypedProgram> program;
     std::vector<support::Diagnostic> diagnostics;
 };
 
-class SemanticAnalyzer
-{
-  public:
-    [[nodiscard]] AnalysisResult analyze(const frontend::Program &program,
-                                         const support::SourceText &source,
-                                         const HostFunctionRegistry &hosts = {}) const;
+class SemanticAnalyzer {
+public:
+    [[nodiscard]] AnalysisResult analyze(const frontend::Program& program,
+                                         const support::SourceText& source,
+                                         const HostFunctionRegistry& hosts = {}) const;
 };
 
 } // namespace ember::semantic

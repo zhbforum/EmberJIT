@@ -5,14 +5,12 @@
 
 #include <string>
 
-namespace ember::frontend
-{
+namespace ember::frontend {
 
-class AstPrinter
-{
-  public:
-    [[nodiscard]] std::string print(const Program &program,
-                                    const support::SourceText &source) const;
+class AstPrinter {
+public:
+    [[nodiscard]] std::string print(const Program& program,
+                                    const support::SourceText& source) const;
 };
 
 } // namespace ember::frontend

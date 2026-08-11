@@ -11,6 +11,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(
+    EMBER_ENABLE_MSVC_ANALYZE
+    "Enable MSVC static code analysis"
+    OFF
+)
+
 function(ember_configure_compile_options target)
     if(MSVC)
         target_compile_options(${target} PRIVATE
@@ -26,6 +32,16 @@ function(ember_configure_compile_options target)
         -Wconversion
         -Wshadow
         )
+    endif()
+
+    if(EMBER_ENABLE_MSVC_ANALYZE)
+        if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            message(FATAL_ERROR
+                "EMBER_ENABLE_MSVC_ANALYZE requires the Microsoft C++ compiler"
+            )
+        endif()
+
+        target_compile_options(${target} PRIVATE /analyze)
     endif()
 endfunction()
 
@@ -114,6 +130,18 @@ if(BUILD_TESTING)
     set(ember_example_directory "${CMAKE_CURRENT_SOURCE_DIR}/examples")
     set(ember_fixture_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     set(ember_test_script_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    set(
+        ember_deterministic_output_script
+        "${ember_test_script_directory}/assert_deterministic_output.cmake"
+    )
+    set(
+        ember_large_input_script
+        "${ember_test_script_directory}/assert_large_input.cmake"
+    )
+    set(
+        ember_generated_test_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/generated-tests"
+    )
 
     set(
         ember_invalid_token_fixture
@@ -133,6 +161,21 @@ if(BUILD_TESTING)
     set(
         ember_dump_ir_fixture
         "${ember_fixture_directory}/dump_ir.ember"
+    )
+
+    set(
+        ember_determinism_fixture
+        "${ember_fixture_directory}/determinism.ember"
+    )
+
+    set(
+        ember_determinism_invalid_fixture
+        "${ember_fixture_directory}/determinism_invalid.ember"
+    )
+
+    set(
+        ember_golden_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
     )
 
     set(
@@ -297,6 +340,58 @@ if(BUILD_TESTING)
             -DEMBER=$<TARGET_FILE:ember>
             -DSOURCE_FILE=${ember_dump_ir_fixture}
             -P ${ember_test_script_directory}/assert_dump_asm_output.cmake
+    )
+
+    foreach(dump_command IN ITEMS tokens ast typed-ast bytecode ir asm)
+        string(REPLACE "-" "_" golden_name "${dump_command}")
+        add_test(
+            NAME ember_deterministic_dump_${golden_name}
+            COMMAND ${CMAKE_COMMAND}
+                -DEMBER=$<TARGET_FILE:ember>
+                -DMODE=golden
+                -DCOMMAND_NAME=dump-${dump_command}
+                -DSOURCE_FILE=${ember_determinism_fixture}
+                -DGOLDEN_FILE=${ember_golden_directory}/dump_${golden_name}.txt
+                -P ${ember_deterministic_output_script}
+        )
+    endforeach()
+
+    add_test(
+        NAME ember_deterministic_invalid_dump
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DMODE=repeated-invalid
+            -DCOMMAND_NAME=dump-asm
+            -DSOURCE_FILE=${ember_determinism_invalid_fixture}
+            -DEXPECTED_EXIT_CODE=1
+            -P ${ember_deterministic_output_script}
+    )
+
+    add_test(
+        NAME ember_large_valid_input
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DMODE=large-valid
+            -DTEST_TEMP_DIR=${ember_generated_test_directory}/large-valid
+            -P ${ember_large_input_script}
+    )
+
+    add_test(
+        NAME ember_large_malformed_input
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DMODE=large-malformed
+            -DTEST_TEMP_DIR=${ember_generated_test_directory}/large-malformed
+            -P ${ember_large_input_script}
+    )
+
+    add_test(
+        NAME ember_hostile_path_input
+        COMMAND ${CMAKE_COMMAND}
+            -DEMBER=$<TARGET_FILE:ember>
+            -DMODE=hostile-path
+            -DTEST_TEMP_DIR=${ember_generated_test_directory}/hostile-path
+            -P ${ember_large_input_script}
     )
 
     add_test(

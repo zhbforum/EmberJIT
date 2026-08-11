@@ -9,10 +9,9 @@
 #include <optional>
 #include <utility>
 
-namespace ember::runtime
-{
-namespace test
-{
+namespace ember::runtime {
+class RuntimeFunction;
+namespace test {
 class NativeCodeHandleAccess;
 }
 
@@ -24,13 +23,12 @@ using NativeFrameError = jit::NativeFrameError;
 // Owns trusted, emitter-produced executable code with the sole native
 // signature supported by this milestone. It is also the only place where an
 // executable address is cast to a C++ function pointer.
-class NativeCodeHandle
-{
-  public:
-    NativeCodeHandle(const NativeCodeHandle &) = delete;
-    auto operator=(const NativeCodeHandle &) -> NativeCodeHandle & = delete;
-    NativeCodeHandle(NativeCodeHandle &&) noexcept = default;
-    auto operator=(NativeCodeHandle &&) noexcept -> NativeCodeHandle & = default;
+class NativeCodeHandle {
+public:
+    NativeCodeHandle(const NativeCodeHandle&) = delete;
+    auto operator=(const NativeCodeHandle&) -> NativeCodeHandle& = delete;
+    NativeCodeHandle(NativeCodeHandle&&) noexcept = default;
+    auto operator=(NativeCodeHandle&&) noexcept -> NativeCodeHandle& = default;
     ~NativeCodeHandle() = default;
 
     // `machineCode` must implement Win64 i64(i64, i64). MachineCode proves
@@ -42,26 +40,53 @@ class NativeCodeHandle
     // extensible baseline entry ABI; callers retain ownership of frame locals.
     [[nodiscard]] static NativeCodeCreateResult
     publishWordFrame(jit::x64::MachineCode machineCode) noexcept;
-    [[nodiscard]] bool valid() const noexcept { return code_.size() != 0; }
+    [[nodiscard]] bool valid() const noexcept {
+        return code_.size() != 0;
+    }
     // Requires valid(); debug builds assert this precondition.
     [[nodiscard]] std::int64_t invokeI64Binary(std::int64_t left, std::int64_t right) const;
     // Requires valid(); debug builds assert this precondition.
-    [[nodiscard]] std::uint64_t invokeWordFrame(NativeFrame &frame) const;
+    [[nodiscard]] std::uint64_t invokeWordFrame(NativeFrame& frame) const;
     // Compatibility adapter for the i64-only bootstrap tests and callers.
-    [[nodiscard]] std::int64_t invokeI64Frame(NativeFrame &frame) const;
-    [[nodiscard]] std::size_t codeSize() const noexcept { return code_.size(); }
+    [[nodiscard]] std::int64_t invokeI64Frame(NativeFrame& frame) const;
+    [[nodiscard]] std::size_t codeSize() const noexcept {
+        return code_.size();
+    }
 
-  private:
-    explicit NativeCodeHandle(jit::CodeBuffer code) noexcept : code_(std::move(code)) {}
-    [[nodiscard]] void *entryAddress() const noexcept { return code_.memory_; }
+private:
+    enum class PublicationFailpointForTesting {
+        none,
+        afterExecutableAllocation,
+        afterExecutableWrite,
+        afterExecutableProtection,
+    };
+
+    enum class PublicationStageForTesting {
+        none,
+        executableAllocated,
+        executableWritten,
+        executableProtected,
+    };
+
+    explicit NativeCodeHandle(jit::CodeBuffer code) noexcept
+        : code_(std::move(code)) {
+    }
+    [[nodiscard]] void* entryAddress() const noexcept {
+        return code_.memory_;
+    }
+    [[nodiscard]] static NativeCodeCreateResult
+    publishWordFrameWithFailpointForTesting(jit::x64::MachineCode machineCode,
+                                            PublicationFailpointForTesting failpoint,
+                                            PublicationStageForTesting* observedStage) noexcept;
+    [[nodiscard]] static std::size_t liveExecutableAllocationCountForTesting() noexcept;
 
     jit::CodeBuffer code_;
 
     friend class test::NativeCodeHandleAccess;
+    friend class RuntimeFunction;
 };
 
-struct NativeCodeCreateResult
-{
+struct NativeCodeCreateResult {
     std::optional<NativeCodeHandle> handle;
     jit::CodeBufferError error{jit::CodeBufferError::none};
 };
