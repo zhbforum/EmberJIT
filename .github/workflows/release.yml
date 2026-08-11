@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version used for package validation"
+        required: true
+        default: "v0.1.0"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    name: Windows x64 release package
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        # v6.1.0; full SHA prevents a mutable tag from changing the executed code.
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "push") {
+              $version = "${{ github.ref_name }}"
+          } else {
+              $version = "${{ inputs.version }}"
+          }
+
+          if ($version -notmatch '^v\d+\.\d+\.\d+$') {
+              throw "Expected a semantic version tag such as v0.1.0, got '$version'."
+          }
+
+          $plainVersion = $version.Substring(1)
+
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "EMBER_VERSION=$plainVersion" >> $env:GITHUB_ENV
+          "PACKAGE_NAME=EmberJIT-$version-windows-x64" >> $env:GITHUB_ENV
+
+      - name: Configure
+        run: >
+          cmake
+          -S .
+          -B build-release
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DBUILD_TESTING=ON
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+      - name: Build
+        run: cmake --build build-release --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build-release -C Release --output-on-failure
+
+      - name: Verify release executable
+        shell: pwsh
+        run: |
+          $versionOutput = & .\build-release\Release\ember.exe --version
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "ember --version failed with exit code $LASTEXITCODE."
+          }
+
+          $expectedVersion = "EmberJIT $env:EMBER_VERSION"
+
+          if ($versionOutput.Trim() -ne $expectedVersion) {
+              throw "Expected '$expectedVersion', got '$versionOutput'."
+          }
+
+          $runOutput = & .\build-release\Release\ember.exe run examples\vm_factorial.ember
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Factorial example failed with exit code $LASTEXITCODE."
+          }
+
+          if ($runOutput.Trim() -ne "120") {
+              throw "Expected factorial output '120', got '$runOutput'."
+          }
+
+      - name: Assemble package
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path "dist" $env:PACKAGE_NAME
+
+          New-Item -ItemType Directory -Force $packageRoot | Out-Null
+
+          Copy-Item .\build-release\Release\ember.exe $packageRoot
+          Copy-Item .\README.md $packageRoot
+          Copy-Item .\LICENSE $packageRoot
+          Copy-Item .\examples (Join-Path $packageRoot "examples") -Recurse
+          Copy-Item .\assets (Join-Path $packageRoot "assets") -Recurse
+
+          $archive = Join-Path "dist" "$env:PACKAGE_NAME.zip"
+
+          Compress-Archive `
+              -Path $packageRoot `
+              -DestinationPath $archive `
+              -CompressionLevel Optimal
+
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          "$hash  $env:PACKAGE_NAME.zip" |
+              Set-Content `
+                  -Path "$archive.sha256" `
+                  -Encoding ascii `
+                  -NoNewline
+
+      - name: Verify packaged archive
+        shell: pwsh
+        run: |
+          $archive = Join-Path "dist" "$env:PACKAGE_NAME.zip"
+          $verifyRoot = Join-Path "dist" "verify"
+
+          Expand-Archive $archive $verifyRoot
+
+          $packageRoot = Join-Path $verifyRoot $env:PACKAGE_NAME
+          $ember = Join-Path $packageRoot "ember.exe"
+          $example = Join-Path $packageRoot "examples\vm_factorial.ember"
+
+          $versionOutput = & $ember --version
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Packaged ember --version failed with exit code $LASTEXITCODE."
+          }
+
+          if ($versionOutput.Trim() -ne "EmberJIT $env:EMBER_VERSION") {
+              throw "Packaged executable reports an unexpected version."
+          }
+
+          $runOutput = & $ember run $example
+
+          if ($LASTEXITCODE -ne 0 -or $runOutput.Trim() -ne "120") {
+              throw "Packaged factorial smoke test failed."
+          }
+
+      - name: Upload validation artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: |
+            dist/${{ env.PACKAGE_NAME }}.zip
+            dist/${{ env.PACKAGE_NAME }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Create draft GitHub release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$env:RELEASE_VERSION"
+          "dist/$env:PACKAGE_NAME.zip"
+          "dist/$env:PACKAGE_NAME.zip.sha256"
+          --verify-tag
+          --draft
+          --title "EmberJIT $env:RELEASE_VERSION"
+          --notes "Release notes will be finalized before publication."
