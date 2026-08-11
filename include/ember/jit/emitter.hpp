@@ -10,13 +10,11 @@
 #include <utility>
 #include <vector>
 
-namespace ember::jit::x64
-{
+namespace ember::jit::x64 {
 // The encoder exposes the GPRs needed by the baseline stack machine. Lowering
 // is responsible for saving every non-volatile register it uses and for Win64
 // shadow space/alignment before any generated call.
-enum class Register : std::uint8_t
-{
+enum class Register : std::uint8_t {
     rax = 0,
     rcx = 1,
     rdx = 2,
@@ -35,14 +33,12 @@ enum class Register : std::uint8_t
     r15 = 15,
 };
 
-enum class XmmRegister : std::uint8_t
-{
+enum class XmmRegister : std::uint8_t {
     xmm0 = 0,
     xmm1 = 1,
 };
 
-enum class Condition : std::uint8_t
-{
+enum class Condition : std::uint8_t {
     equal = 0x4,
     notEqual = 0x5,
     less = 0xC,
@@ -57,8 +53,7 @@ enum class Condition : std::uint8_t
     notParity = 0xB,
 };
 
-enum class EmitError
-{
+enum class EmitError {
     none,
     finalized,
     invalidLabel,
@@ -72,20 +67,18 @@ enum class EmitError
 
 class Emitter;
 class EmitterIdentity;
-namespace test
-{
+namespace test {
 class EmitterAccess;
 }
 
-class Label
-{
-  public:
+class Label {
+public:
     Label() = delete;
 
-  private:
+private:
     Label(std::uint32_t id, std::weak_ptr<const EmitterIdentity> owner) noexcept
-        : id_(id), owner_(std::move(owner))
-    {
+        : id_(id),
+          owner_(std::move(owner)) {
     }
 
     std::uint32_t id_;
@@ -93,26 +86,28 @@ class Label
     friend class Emitter;
 };
 
-class MachineCode
-{
-  public:
-    MachineCode(const MachineCode &) = delete;
-    auto operator=(const MachineCode &) -> MachineCode & = delete;
-    MachineCode(MachineCode &&) noexcept = default;
-    auto operator=(MachineCode &&) noexcept -> MachineCode & = default;
+class MachineCode {
+public:
+    MachineCode(const MachineCode&) = delete;
+    auto operator=(const MachineCode&) -> MachineCode& = delete;
+    MachineCode(MachineCode&&) noexcept = default;
+    auto operator=(MachineCode&&) noexcept -> MachineCode& = default;
 
-    [[nodiscard]] std::span<const std::byte> bytes() const noexcept { return bytes_; }
+    [[nodiscard]] std::span<const std::byte> bytes() const noexcept {
+        return bytes_;
+    }
     [[nodiscard]] std::string listing() const;
 
-  private:
-    explicit MachineCode(std::vector<std::byte> bytes) : bytes_(std::move(bytes)) {}
+private:
+    explicit MachineCode(std::vector<std::byte> bytes)
+        : bytes_(std::move(bytes)) {
+    }
 
     std::vector<std::byte> bytes_;
     friend class Emitter;
 };
 
-struct EmissionResult
-{
+struct EmissionResult {
     std::optional<MachineCode> code;
     EmitError error{EmitError::none};
 };
@@ -121,18 +116,17 @@ struct EmissionResult
 // Every relative branch is a rel32 fixup; finalize() resolves all labels and
 // returns no code on any validation failure. Allocation exceptions propagate;
 // callers must discard an emitter after any exception.
-class Emitter
-{
-  public:
+class Emitter {
+public:
     Emitter();
     ~Emitter();
-    Emitter(const Emitter &) = delete;
-    auto operator=(const Emitter &) -> Emitter & = delete;
-    Emitter(Emitter &&) = delete;
-    auto operator=(Emitter &&) -> Emitter & = delete;
+    Emitter(const Emitter&) = delete;
+    auto operator=(const Emitter&) -> Emitter& = delete;
+    Emitter(Emitter&&) = delete;
+    auto operator=(Emitter&&) -> Emitter& = delete;
 
     [[nodiscard]] Label createLabel();
-    [[nodiscard]] bool bind(const Label &label);
+    [[nodiscard]] bool bind(const Label& label);
 
     [[nodiscard]] bool move(Register destination, Register source);
     [[nodiscard]] bool moveImmediate64(Register destination, std::int64_t value);
@@ -151,8 +145,8 @@ class Emitter
     [[nodiscard]] bool subtractStackPointer(std::uint32_t bytes);
     [[nodiscard]] bool addStackPointer(std::uint32_t bytes);
     [[nodiscard]] bool load(Register destination, Register base, std::int32_t displacement);
-    [[nodiscard]] bool loadEffectiveAddress(Register destination, Register base,
-                                            std::int32_t displacement);
+    [[nodiscard]] bool
+    loadEffectiveAddress(Register destination, Register base, std::int32_t displacement);
     [[nodiscard]] bool store(Register base, std::int32_t displacement, Register source);
     [[nodiscard]] bool moveToXmm(XmmRegister destination, Register source);
     [[nodiscard]] bool moveFromXmm(Register destination, XmmRegister source);
@@ -168,15 +162,14 @@ class Emitter
     // and may trap for zero divisor or INT64_MIN / -1. RAX and RDX are
     // rejected as explicit divisors because they are implicit operands.
     [[nodiscard]] bool signedDivide(Register divisor);
-    [[nodiscard]] bool jump(const Label &target);
-    [[nodiscard]] bool jump(Condition condition, const Label &target);
+    [[nodiscard]] bool jump(const Label& target);
+    [[nodiscard]] bool jump(Condition condition, const Label& target);
     [[nodiscard]] bool returnFromFunction();
 
     [[nodiscard]] EmissionResult finalize();
 
-  private:
-    struct Fixup
-    {
+private:
+    struct Fixup {
         std::uint32_t label;
         std::size_t displacementOffset;
     };
@@ -186,7 +179,7 @@ class Emitter
     [[nodiscard]] static bool canAppend(std::size_t currentSize,
                                         std::size_t instructionSize) noexcept;
     [[nodiscard]] bool beginInstruction(std::size_t size);
-    [[nodiscard]] bool valid(const Label &label) const noexcept;
+    [[nodiscard]] bool valid(const Label& label) const noexcept;
     void fail(EmitError error) noexcept;
     void appendByte(std::uint8_t value);
     void appendUInt32(std::uint32_t value);

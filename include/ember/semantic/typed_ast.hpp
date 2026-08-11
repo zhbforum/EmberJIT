@@ -9,28 +9,15 @@
 #include <variant>
 #include <vector>
 
-namespace ember::semantic
-{
+namespace ember::semantic {
 
-enum class Type
-{
-    i64,
-    f64,
-    boolean,
-    voidType
-};
+enum class Type { i64, f64, boolean, voidType };
 using SymbolId = std::uint32_t;
 using FunctionId = std::uint32_t;
-enum class FunctionKind
-{
-    user,
-    host
-};
+enum class FunctionKind { user, host };
 
-[[nodiscard]] constexpr auto typeName(Type type) noexcept -> std::string_view
-{
-    switch (type)
-    {
+[[nodiscard]] constexpr auto typeName(Type type) noexcept -> std::string_view {
+    switch (type) {
     case Type::i64:
         return "i64";
     case Type::f64:
@@ -50,118 +37,108 @@ using TypedExpressionPtr = std::unique_ptr<TypedExpression>;
 using TypedStatementPtr = std::unique_ptr<TypedStatement>;
 using TypedBlockPtr = std::unique_ptr<TypedBlock>;
 
-struct TypedIdentifierExpression
-{
+struct TypedIdentifierExpression {
     support::SourceSpan nameSpan;
     SymbolId symbol;
 };
 using LiteralValue = std::variant<std::int64_t, double, bool>;
-struct TypedLiteralExpression
-{
+struct TypedLiteralExpression {
     support::SourceSpan literalSpan;
     LiteralValue value;
 };
-struct TypedUnaryExpression
-{
+struct TypedUnaryExpression {
     frontend::UnaryOperator operation;
     support::SourceSpan operatorSpan;
     TypedExpressionPtr operand;
 };
-struct TypedBinaryExpression
-{
+struct TypedBinaryExpression {
     frontend::BinaryOperator operation;
     support::SourceSpan operatorSpan;
     TypedExpressionPtr left;
     TypedExpressionPtr right;
 };
-struct TypedCallExpression
-{
+struct TypedCallExpression {
     support::SourceSpan calleeSpan;
     FunctionId callee;
     std::vector<TypedExpressionPtr> arguments;
 };
-struct TypedParenthesizedExpression
-{
+struct TypedParenthesizedExpression {
     TypedExpressionPtr expression;
 };
 
-struct TypedExpression
-{
+struct TypedExpression {
     support::SourceSpan span;
     Type type;
-    std::variant<TypedIdentifierExpression, TypedLiteralExpression, TypedUnaryExpression,
-                 TypedBinaryExpression, TypedCallExpression, TypedParenthesizedExpression>
+    std::variant<TypedIdentifierExpression,
+                 TypedLiteralExpression,
+                 TypedUnaryExpression,
+                 TypedBinaryExpression,
+                 TypedCallExpression,
+                 TypedParenthesizedExpression>
         node;
 };
 
-struct TypedLetStatement
-{
+struct TypedLetStatement {
     support::SourceSpan nameSpan;
     SymbolId symbol;
     Type type;
     TypedExpressionPtr initializer;
 };
-struct TypedAssignmentStatement
-{
+struct TypedAssignmentStatement {
     support::SourceSpan targetSpan;
     SymbolId target;
     Type targetType;
     TypedExpressionPtr value;
 };
-struct TypedReturnStatement
-{
+struct TypedReturnStatement {
     TypedExpressionPtr value;
 };
-struct TypedIfStatement
-{
+struct TypedIfStatement {
     TypedExpressionPtr condition;
     TypedBlockPtr thenBlock;
     TypedStatementPtr elseBranch;
 };
-struct TypedWhileStatement
-{
+struct TypedWhileStatement {
     TypedExpressionPtr condition;
     TypedBlockPtr body;
 };
-struct TypedExpressionStatement
-{
+struct TypedExpressionStatement {
     TypedExpressionPtr expression;
 };
 
-struct TypedStatement
-{
+struct TypedStatement {
     support::SourceSpan span;
-    std::variant<TypedLetStatement, TypedAssignmentStatement, TypedReturnStatement,
-                 TypedIfStatement, TypedWhileStatement, TypedExpressionStatement, TypedBlockPtr>
+    std::variant<TypedLetStatement,
+                 TypedAssignmentStatement,
+                 TypedReturnStatement,
+                 TypedIfStatement,
+                 TypedWhileStatement,
+                 TypedExpressionStatement,
+                 TypedBlockPtr>
         node;
 };
 
-struct TypedBlock
-{
+struct TypedBlock {
     support::SourceSpan span;
     std::vector<TypedStatement> statements;
 };
-struct TypedParameter
-{
+struct TypedParameter {
     support::SourceSpan span;
     support::SourceSpan nameSpan;
     SymbolId symbol;
     Type type;
 };
-struct FunctionSignature
-{
+struct FunctionSignature {
     std::vector<Type> parameterTypes;
     Type returnType;
 };
-struct ResolvedFunction
-{
+struct ResolvedFunction {
     FunctionId id;
     FunctionKind kind;
     std::string name;
     FunctionSignature signature;
 };
-struct TypedFunctionDeclaration
-{
+struct TypedFunctionDeclaration {
     support::SourceSpan span;
     support::SourceSpan nameSpan;
     FunctionId id;
@@ -170,8 +147,7 @@ struct TypedFunctionDeclaration
     std::vector<TypedParameter> parameters;
     TypedBlock body;
 };
-struct TypedProgram
-{
+struct TypedProgram {
     support::SourceSpan span;
     std::vector<ResolvedFunction> functions;
     std::vector<TypedFunctionDeclaration> declarations;

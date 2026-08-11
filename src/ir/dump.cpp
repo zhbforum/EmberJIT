@@ -4,14 +4,10 @@
 #include <sstream>
 #include <string_view>
 
-namespace ember::ir
-{
-namespace
-{
-[[nodiscard]] std::string_view opcodeName(Opcode opcode)
-{
-    switch (opcode)
-    {
+namespace ember::ir {
+namespace {
+[[nodiscard]] std::string_view opcodeName(Opcode opcode) {
+    switch (opcode) {
     case Opcode::parameter:
         return "param";
     case Opcode::constantI64:
@@ -85,32 +81,28 @@ namespace
 }
 } // namespace
 
-std::string dump(const VerifiedFunction &verified)
-{
-    const auto &function = verified.function();
+std::string dump(const VerifiedFunction& verified) {
+    const auto& function = verified.function();
     std::ostringstream output;
     output << "fn #" << function.id << " (";
-    for (std::size_t index = 0; index < function.signature.parameterTypes.size(); ++index)
-    {
+    for (std::size_t index = 0; index < function.signature.parameterTypes.size(); ++index) {
         if (index != 0)
             output << ", ";
         output << semantic::typeName(function.signature.parameterTypes[index]);
     }
     output << ") -> " << semantic::typeName(function.signature.returnType) << '\n';
     for (std::size_t local = 0; local < function.localTypes.size(); ++local)
-        output << "  local %" << local << ": " << semantic::typeName(function.localTypes[local]) << '\n';
-    for (const auto &block : function.blocks)
-    {
+        output << "  local %" << local << ": " << semantic::typeName(function.localTypes[local])
+               << '\n';
+    for (const auto& block : function.blocks) {
         output << "block b" << block.id << ":\n";
-        for (const auto &instruction : block.instructions)
-        {
+        for (const auto& instruction : block.instructions) {
             output << "  ";
             if (instruction.result != noValue)
                 output << "v" << instruction.result << ':'
                        << semantic::typeName(function.valueTypes[instruction.result]) << " = ";
             output << opcodeName(instruction.opcode);
-            switch (instruction.opcode)
-            {
+            switch (instruction.opcode) {
             case Opcode::parameter:
             case Opcode::loadLocal:
                 output << " %" << instruction.local;
@@ -160,8 +152,7 @@ std::string dump(const VerifiedFunction &verified)
             case Opcode::callValue:
             case Opcode::callVoid:
                 output << " #" << instruction.callee << "(";
-                for (std::size_t index{}; index < instruction.arguments.size(); ++index)
-                {
+                for (std::size_t index{}; index < instruction.arguments.size(); ++index) {
                     if (index != 0)
                         output << ", ";
                     output << "v" << instruction.arguments[index];
@@ -171,8 +162,7 @@ std::string dump(const VerifiedFunction &verified)
             }
             output << '\n';
         }
-        switch (block.terminator.kind)
-        {
+        switch (block.terminator.kind) {
         case TerminatorKind::branch:
             output << "  branch b" << block.terminator.trueTarget << '\n';
             break;

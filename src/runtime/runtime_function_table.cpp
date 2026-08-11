@@ -5,30 +5,25 @@
 #include <memory>
 #include <utility>
 
-namespace ember::runtime
-{
+namespace ember::runtime {
 RuntimeFunctionTable::RuntimeFunctionTable(bytecode::VerifiedProgram verifiedProgram,
-                                           bool retainNativeSource)
-{
-    if (retainNativeSource)
-    {
-        auto nativeSource = std::make_shared<const bytecode::VerifiedProgram>(std::move(verifiedProgram));
-        const auto &program = nativeSource->program();
+                                           bool retainNativeSource) {
+    if (retainNativeSource) {
+        auto nativeSource =
+            std::make_shared<const bytecode::VerifiedProgram>(std::move(verifiedProgram));
+        const auto& program = nativeSource->program();
         functions_.reserve(program.functions.size());
-        for (const auto &function : program.functions)
+        for (const auto& function : program.functions)
             functions_.emplace_back(function, nativeSource);
-    }
-    else
-    {
+    } else {
         auto program = std::move(verifiedProgram).takeProgram();
         functions_.reserve(program.functions.size());
-        for (auto &function : program.functions)
+        for (auto& function : program.functions)
             functions_.emplace_back(std::move(function), nullptr);
     }
 
     index_.reserve(functions_.size());
-    for (std::size_t index = 0; index < functions_.size(); ++index)
-    {
+    for (std::size_t index = 0; index < functions_.size(); ++index) {
         const bool inserted = index_.emplace(functions_[index].id(), index).second;
         assert(inserted);
         if (!inserted)
@@ -36,14 +31,12 @@ RuntimeFunctionTable::RuntimeFunctionTable(bytecode::VerifiedProgram verifiedPro
     }
 }
 
-const RuntimeFunction *RuntimeFunctionTable::find(semantic::FunctionId id) const noexcept
-{
+const RuntimeFunction* RuntimeFunctionTable::find(semantic::FunctionId id) const noexcept {
     const auto found = index_.find(id);
     return found == index_.end() ? nullptr : &functions_[found->second];
 }
 
-RuntimeFunction *RuntimeFunctionTable::findMutable(semantic::FunctionId id) noexcept
-{
+RuntimeFunction* RuntimeFunctionTable::findMutable(semantic::FunctionId id) noexcept {
     const auto found = index_.find(id);
     return found == index_.end() ? nullptr : &functions_[found->second];
 }

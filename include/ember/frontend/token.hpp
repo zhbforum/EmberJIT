@@ -4,11 +4,9 @@
 
 #include <string_view>
 
-namespace ember::frontend
-{
+namespace ember::frontend {
 
-enum class TokenKind
-{
+enum class TokenKind {
     endOfFile,
     identifier,
     integerLiteral,
@@ -53,11 +51,8 @@ enum class TokenKind
     arrow,
 };
 
-[[nodiscard]] constexpr auto tokenKindName(TokenKind kind) noexcept
-    -> std::string_view
-{
-    switch (kind)
-    {
+[[nodiscard]] constexpr auto tokenKindName(TokenKind kind) noexcept -> std::string_view {
+    switch (kind) {
     case TokenKind::endOfFile:
         return "end_of_file";
     case TokenKind::identifier:
@@ -141,8 +136,7 @@ enum class TokenKind
     return "<invalid-token-kind>";
 }
 
-struct Token
-{
+struct Token {
     TokenKind kind{TokenKind::endOfFile};
     support::SourceSpan span{};
 

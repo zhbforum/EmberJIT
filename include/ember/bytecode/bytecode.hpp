@@ -9,12 +9,10 @@
 #include <variant>
 #include <vector>
 
-namespace ember::bytecode
-{
+namespace ember::bytecode {
 using Value = std::variant<std::int64_t, double, bool>;
 
-enum class Opcode : std::uint8_t
-{
+enum class Opcode : std::uint8_t {
     constant,
     load,
     store,
@@ -51,14 +49,12 @@ enum class Opcode : std::uint8_t
     returnVoid
 };
 
-struct Instruction
-{
+struct Instruction {
     Opcode opcode;
     std::uint32_t operand{}; // local slot, instruction target, or function id
     std::optional<Value> value;
 };
-struct Function
-{
+struct Function {
     semantic::FunctionId id;
     semantic::FunctionKind kind{semantic::FunctionKind::user};
     semantic::FunctionSignature signature;
@@ -66,48 +62,48 @@ struct Function
     std::vector<semantic::Type> localTypes;
     std::vector<Instruction> code;
 };
-struct Program
-{
+struct Program {
     std::vector<Function> functions;
 };
-struct CompileResult
-{
+struct CompileResult {
     std::optional<Program> program;
     std::vector<support::Diagnostic> diagnostics;
 };
-class VerifiedProgram
-{
-  public:
-    VerifiedProgram(const VerifiedProgram &) = delete;
-    auto operator=(const VerifiedProgram &) -> VerifiedProgram & = delete;
-    VerifiedProgram(VerifiedProgram &&) noexcept = default;
-    auto operator=(VerifiedProgram &&) noexcept -> VerifiedProgram & = default;
+class VerifiedProgram {
+public:
+    VerifiedProgram(const VerifiedProgram&) = delete;
+    auto operator=(const VerifiedProgram&) -> VerifiedProgram& = delete;
+    VerifiedProgram(VerifiedProgram&&) noexcept = default;
+    auto operator=(VerifiedProgram&&) noexcept -> VerifiedProgram& = default;
 
-    [[nodiscard]] const Program &program() const noexcept { return program_; }
-    [[nodiscard]] Program takeProgram() && noexcept { return std::move(program_); }
+    [[nodiscard]] const Program& program() const noexcept {
+        return program_;
+    }
+    [[nodiscard]] Program takeProgram() && noexcept {
+        return std::move(program_);
+    }
 
-  private:
-    explicit VerifiedProgram(Program program) : program_(std::move(program)) {}
+private:
+    explicit VerifiedProgram(Program program)
+        : program_(std::move(program)) {
+    }
 
     Program program_;
     friend class Verifier;
 };
-struct VerifyResult
-{
+struct VerifyResult {
     std::optional<VerifiedProgram> program;
     std::vector<support::Diagnostic> diagnostics;
 };
 
-class Compiler
-{
-  public:
+class Compiler {
+public:
     // Precondition: program was returned successfully by SemanticAnalyzer.
-    [[nodiscard]] CompileResult compile(const semantic::TypedProgram &program) const;
+    [[nodiscard]] CompileResult compile(const semantic::TypedProgram& program) const;
 };
-class Verifier
-{
-  public:
+class Verifier {
+public:
     [[nodiscard]] VerifyResult verify(Program program) const;
 };
-[[nodiscard]] std::string dump(const VerifiedProgram &program);
+[[nodiscard]] std::string dump(const VerifiedProgram& program);
 } // namespace ember::bytecode

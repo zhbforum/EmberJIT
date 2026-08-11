@@ -7,8 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace ember::ir
-{
+namespace ember::ir {
 using ValueId = std::uint32_t;
 using BlockId = std::uint32_t;
 using LocalId = std::uint32_t;
@@ -18,8 +17,7 @@ inline constexpr BlockId noBlock = std::numeric_limits<BlockId>::max();
 inline constexpr LocalId noLocal = std::numeric_limits<LocalId>::max();
 inline constexpr semantic::FunctionId noFunction = std::numeric_limits<semantic::FunctionId>::max();
 
-enum class Opcode : std::uint8_t
-{
+enum class Opcode : std::uint8_t {
     parameter,
     constantI64,
     constantF64,
@@ -56,8 +54,7 @@ enum class Opcode : std::uint8_t
     callVoid,
 };
 
-struct Instruction
-{
+struct Instruction {
     Opcode opcode;
     ValueId result{noValue};
     ValueId input{noValue};
@@ -77,27 +74,30 @@ struct Instruction
     [[nodiscard]] static Instruction storeLocal(LocalId local, ValueId value) noexcept;
     [[nodiscard]] static Instruction negateI64(ValueId result, ValueId input) noexcept;
     [[nodiscard]] static Instruction negateF64(ValueId result, ValueId input) noexcept;
-    [[nodiscard]] static Instruction binary(Opcode opcode, ValueId result, ValueId left,
-                                            ValueId right) noexcept;
-    [[nodiscard]] static Instruction callI64(ValueId result, semantic::FunctionId callee,
-                                             std::vector<ValueId> arguments,
-                                             semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
-    [[nodiscard]] static Instruction callValue(ValueId result, semantic::FunctionId callee,
-                                                std::vector<ValueId> arguments,
-                                                semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
-    [[nodiscard]] static Instruction callVoid(semantic::FunctionId callee,
-                                               std::vector<ValueId> arguments,
-                                               semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+    [[nodiscard]] static Instruction
+    binary(Opcode opcode, ValueId result, ValueId left, ValueId right) noexcept;
+    [[nodiscard]] static Instruction
+    callI64(ValueId result,
+            semantic::FunctionId callee,
+            std::vector<ValueId> arguments,
+            semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+    [[nodiscard]] static Instruction
+    callValue(ValueId result,
+              semantic::FunctionId callee,
+              std::vector<ValueId> arguments,
+              semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+    [[nodiscard]] static Instruction
+    callVoid(semantic::FunctionId callee,
+             std::vector<ValueId> arguments,
+             semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
 };
 
 // Visits every virtual-register use encoded by one instruction. Shared by
 // optimization analyses and operand rewriting; the overloads intentionally
 // expose mutable references for rewriting and const references for analysis.
 template <typename InstructionType, typename Callback>
-void forEachUseImpl(InstructionType &instruction, Callback &&callback)
-{
-    switch (instruction.opcode)
-    {
+void forEachUseImpl(InstructionType& instruction, Callback&& callback) {
+    switch (instruction.opcode) {
     case Opcode::storeLocal:
     case Opcode::negateI64:
     case Opcode::negateF64:
@@ -132,7 +132,7 @@ void forEachUseImpl(InstructionType &instruction, Callback &&callback)
     case Opcode::callI64:
     case Opcode::callValue:
     case Opcode::callVoid:
-        for (auto &argument : instruction.arguments)
+        for (auto& argument : instruction.arguments)
             callback(argument);
         break;
     case Opcode::parameter:
@@ -144,20 +144,15 @@ void forEachUseImpl(InstructionType &instruction, Callback &&callback)
     }
 }
 
-template <typename Callback>
-void forEachUse(Instruction &instruction, Callback &&callback)
-{
+template <typename Callback> void forEachUse(Instruction& instruction, Callback&& callback) {
     forEachUseImpl(instruction, std::forward<Callback>(callback));
 }
 
-template <typename Callback>
-void forEachUse(const Instruction &instruction, Callback &&callback)
-{
+template <typename Callback> void forEachUse(const Instruction& instruction, Callback&& callback) {
     forEachUseImpl(instruction, std::forward<Callback>(callback));
 }
 
-enum class TerminatorKind : std::uint8_t
-{
+enum class TerminatorKind : std::uint8_t {
     invalid,
     branch,
     branchIfFalse,
@@ -165,8 +160,7 @@ enum class TerminatorKind : std::uint8_t
     returnVoid,
 };
 
-struct Terminator
-{
+struct Terminator {
     TerminatorKind kind{TerminatorKind::invalid};
     ValueId condition{noValue};
     ValueId value{noValue};
@@ -174,14 +168,13 @@ struct Terminator
     BlockId falseTarget{noBlock};
 
     [[nodiscard]] static Terminator branch(BlockId target) noexcept;
-    [[nodiscard]] static Terminator branchIfFalse(ValueId condition, BlockId falseTarget,
-                                                   BlockId trueTarget) noexcept;
+    [[nodiscard]] static Terminator
+    branchIfFalse(ValueId condition, BlockId falseTarget, BlockId trueTarget) noexcept;
     [[nodiscard]] static Terminator returnValue(ValueId value) noexcept;
     [[nodiscard]] static Terminator returnVoid() noexcept;
 };
 
-struct BasicBlock
-{
+struct BasicBlock {
     BlockId id;
     std::vector<Instruction> instructions;
     Terminator terminator{};
@@ -189,8 +182,7 @@ struct BasicBlock
 
 // `valueTypes[index]` is the type of virtual register `v<index>`. Void is a
 // function return type only and is never a virtual-register or local type.
-struct Function
-{
+struct Function {
     semantic::FunctionId id;
     semantic::FunctionSignature signature;
     std::vector<semantic::Type> localTypes;

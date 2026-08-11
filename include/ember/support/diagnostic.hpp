@@ -22,11 +22,11 @@ enum class DiagnosticSeverity {
 };
 
 struct Diagnostic {
-    DiagnosticStage stage {DiagnosticStage::lexer};
-    DiagnosticSeverity severity {DiagnosticSeverity::error};
+    DiagnosticStage stage{DiagnosticStage::lexer};
+    DiagnosticSeverity severity{DiagnosticSeverity::error};
     std::string code;
     std::string message;
-    SourceSpan primarySpan {};
+    SourceSpan primarySpan{};
 };
 
 } // namespace ember::support

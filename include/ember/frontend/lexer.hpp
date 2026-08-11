@@ -6,19 +6,16 @@
 
 #include <vector>
 
-namespace ember::frontend
-{
+namespace ember::frontend {
 
-struct LexResult
-{
+struct LexResult {
     std::vector<Token> tokens;
     std::vector<support::Diagnostic> diagnostics;
 };
 
-class Lexer
-{
-  public:
-    [[nodiscard]] LexResult lex(const support::SourceText &source) const;
+class Lexer {
+public:
+    [[nodiscard]] LexResult lex(const support::SourceText& source) const;
 };
 
 } // namespace ember::frontend
