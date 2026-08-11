@@ -11,6 +11,22 @@ permissions:
   contents: read
 
 jobs:
+  format:
+    name: Format / clang-format 18
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        # v6.1.0; full SHA prevents a mutable tag from changing the executed code.
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Verify C++ formatting
+        shell: bash
+        run: |
+          clang-format-18 --version
+          git ls-files -z -- '*.cpp' '*.hpp' |
+            xargs -0 --no-run-if-empty clang-format-18 --dry-run --Werror
+
   linux:
     name: Linux / Clang
     runs-on: ubuntu-24.04
