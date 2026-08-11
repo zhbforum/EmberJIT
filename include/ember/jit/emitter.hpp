@@ -72,6 +72,10 @@ enum class EmitError
 
 class Emitter;
 class EmitterIdentity;
+namespace test
+{
+class EmitterAccess;
+}
 
 class Label
 {
@@ -177,6 +181,10 @@ class Emitter
         std::size_t displacementOffset;
     };
 
+    [[nodiscard]] static std::optional<std::int32_t> checkedRel32(std::int64_t delta) noexcept;
+    [[nodiscard]] static std::size_t maximumCodeSize() noexcept;
+    [[nodiscard]] static bool canAppend(std::size_t currentSize,
+                                        std::size_t instructionSize) noexcept;
     [[nodiscard]] bool beginInstruction(std::size_t size);
     [[nodiscard]] bool valid(const Label &label) const noexcept;
     void fail(EmitError error) noexcept;
@@ -193,5 +201,7 @@ class Emitter
     std::shared_ptr<const EmitterIdentity> identity_;
     EmitError error_{EmitError::none};
     bool finalized_{};
+
+    friend class test::EmitterAccess;
 };
 } // namespace ember::jit::x64

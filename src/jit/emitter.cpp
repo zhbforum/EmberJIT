@@ -14,7 +14,8 @@ class EmitterIdentity
 
 namespace
 {
-constexpr auto maximumCodeSize = static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
+constexpr auto maximumRel32CodeSize =
+    static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
 
 [[nodiscard]] auto registerCode(Register value) noexcept -> std::uint8_t
 {
@@ -486,11 +487,18 @@ EmissionResult Emitter::finalize()
     {
         const auto target = *labels_[fixup.label];
         const auto nextInstruction = fixup.displacementOffset + sizeof(std::uint32_t);
-        // beginInstruction() bounds the complete buffer to INT32_MAX bytes,
-        // therefore every offset difference within this buffer fits rel32.
-        const auto displacement = static_cast<std::int64_t>(target) -
-                                  static_cast<std::int64_t>(nextInstruction);
-        const auto encoded = static_cast<std::uint32_t>(static_cast<std::int32_t>(displacement));
+        // beginInstruction() bounds both offsets to maximumCodeSize(), so
+        // their signed conversion and subtraction are safe before rel32
+        // range validation.
+        const auto target64 = static_cast<std::int64_t>(target);
+        const auto nextInstruction64 = static_cast<std::int64_t>(nextInstruction);
+        const auto displacement = checkedRel32(target64 - nextInstruction64);
+        if (!displacement)
+        {
+            error_ = EmitError::codeTooLarge;
+            return {.code = std::nullopt, .error = error_};
+        }
+        const auto encoded = static_cast<std::uint32_t>(*displacement);
         for (std::size_t byteIndex{}; byteIndex < sizeof(encoded); ++byteIndex)
         {
             const auto shift = static_cast<unsigned int>(byteIndex * 8U);
@@ -499,6 +507,25 @@ EmissionResult Emitter::finalize()
         }
     }
     return {.code = MachineCode{std::move(bytes_)}, .error = EmitError::none};
+}
+
+std::optional<std::int32_t> Emitter::checkedRel32(std::int64_t delta) noexcept
+{
+    if (delta < std::numeric_limits<std::int32_t>::min() ||
+        delta > std::numeric_limits<std::int32_t>::max())
+        return std::nullopt;
+    return static_cast<std::int32_t>(delta);
+}
+
+std::size_t Emitter::maximumCodeSize() noexcept
+{
+    return maximumRel32CodeSize;
+}
+
+bool Emitter::canAppend(std::size_t currentSize, std::size_t instructionSize) noexcept
+{
+    return instructionSize <= maximumRel32CodeSize &&
+           currentSize <= maximumRel32CodeSize - instructionSize;
 }
 
 bool Emitter::beginInstruction(std::size_t size)
@@ -510,7 +537,7 @@ bool Emitter::beginInstruction(std::size_t size)
         fail(EmitError::finalized);
         return false;
     }
-    if (size > maximumCodeSize || bytes_.size() > maximumCodeSize - size)
+    if (!canAppend(bytes_.size(), size))
     {
         fail(EmitError::codeTooLarge);
         return false;

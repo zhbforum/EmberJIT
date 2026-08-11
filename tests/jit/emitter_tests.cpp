@@ -1,5 +1,6 @@
 #include "ember/jit/emitter.hpp"
 #include "ember/jit/platform.hpp"
+#include "jit/emitter_test_access.hpp"
 #include "jit/native_code_test_access.hpp"
 
 #include "test_harness.hpp"
@@ -9,6 +10,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <utility>
@@ -26,6 +28,41 @@ namespace
     return std::ranges::equal(actual, expected);
 }
 } // namespace
+
+EMBER_TEST("x64 emitter checks rel32 and code-size boundaries without allocation")
+{
+    using ember::jit::x64::test::EmitterAccess;
+
+    constexpr auto minimumRel32 =
+        static_cast<std::int64_t>((std::numeric_limits<std::int32_t>::min)());
+    constexpr auto maximumRel32 =
+        static_cast<std::int64_t>((std::numeric_limits<std::int32_t>::max)());
+
+    const auto minimum = EmitterAccess::checkedRel32(minimumRel32);
+    tests.expect(minimum && *minimum == (std::numeric_limits<std::int32_t>::min)(),
+                 "INT32_MIN rel32 displacement is accepted");
+    const auto maximum = EmitterAccess::checkedRel32(maximumRel32);
+    tests.expect(maximum && *maximum == (std::numeric_limits<std::int32_t>::max)(),
+                 "INT32_MAX rel32 displacement is accepted");
+    tests.expect(!EmitterAccess::checkedRel32(minimumRel32 - 1),
+                 "rel32 displacement below INT32_MIN is rejected");
+    tests.expect(!EmitterAccess::checkedRel32(maximumRel32 + 1),
+                 "rel32 displacement above INT32_MAX is rejected");
+    const auto zero = EmitterAccess::checkedRel32(0);
+    tests.expect(zero && *zero == 0, "zero rel32 displacement is accepted");
+
+    const auto maximumCodeSize = EmitterAccess::maximumCodeSize();
+    tests.expect(EmitterAccess::canAppend(maximumCodeSize, 0),
+                 "code-size boundary accepts a zero-byte label binding");
+    tests.expect(EmitterAccess::canAppend(maximumCodeSize - 1, 1),
+                 "code-size boundary accepts an instruction ending at the maximum");
+    tests.expect(!EmitterAccess::canAppend(maximumCodeSize, 1),
+                 "code-size boundary rejects an instruction past the maximum");
+    tests.expect(!EmitterAccess::canAppend(maximumCodeSize - 1, 2),
+                 "code-size boundary rejects a two-byte overflow");
+    tests.expect(!EmitterAccess::canAppend(0, maximumCodeSize + 1),
+                 "instruction larger than the maximum is rejected");
+}
 
 EMBER_TEST("x64 emitter encodes arithmetic with golden bytes")
 {
