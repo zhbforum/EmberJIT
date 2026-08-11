@@ -1,0 +1,206 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 940" role="img" aria-labelledby="title description">
+  <title id="title">EmberJIT verified tiered execution</title>
+  <desc id="description">Ember source is parsed, type checked, compiled to verified bytecode, and dispatched to either the VM or a verified native compilation pipeline. Failed native work falls back to the VM.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.13"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path class="arrow-head" d="M 1 1 L 11 6 L 1 11 z"/>
+    </marker>
+    <marker id="orange-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path class="orange-arrow-head" d="M 1 1 L 11 6 L 1 11 z"/>
+    </marker>
+    <style>
+      :root {
+        --canvas: #f8fafc;
+        --panel: #ffffff;
+        --panel-stroke: #dce5ec;
+        --heading: #152331;
+        --copy: #495968;
+        --muted: #607080;
+        --line: #536577;
+        --lane: #677787;
+        --divider: #e6edf2;
+        --source-fill: #f5f7fa;
+        --source-stroke: #8795a4;
+        --blue-fill: #e9f1ff;
+        --blue-stroke: #3674b5;
+        --frontend-fill: #eef3ff;
+        --frontend-stroke: #6579b8;
+        --verified-fill: #e8f7ee;
+        --verified-stroke: #2d8b62;
+        --verified-tag-fill: #d2f0dd;
+        --verified-tag-text: #236744;
+        --native-fill: #fff2dc;
+        --native-stroke: #c98231;
+        --native-tag-fill: #ffe4c4;
+        --native-tag-text: #9a591a;
+        --note-fill: #f3f7f9;
+        --note-stroke: #cbd8e1;
+        --fallback: #bb6a2a;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --canvas: #0d1117;
+          --panel: #161b22;
+          --panel-stroke: #30363d;
+          --heading: #f0f6fc;
+          --copy: #c9d1d9;
+          --muted: #9da7b3;
+          --line: #8b949e;
+          --lane: #a8b3bf;
+          --divider: #30363d;
+          --source-fill: #21262d;
+          --source-stroke: #8b949e;
+          --blue-fill: #142b4a;
+          --blue-stroke: #58a6ff;
+          --frontend-fill: #1f2a44;
+          --frontend-stroke: #7aa2f7;
+          --verified-fill: #153d31;
+          --verified-stroke: #3fb950;
+          --verified-tag-fill: #1f4d3b;
+          --verified-tag-text: #7ee787;
+          --native-fill: #3b2d1b;
+          --native-stroke: #d29922;
+          --native-tag-fill: #4b351a;
+          --native-tag-text: #f2cc60;
+          --note-fill: #21262d;
+          --note-stroke: #484f58;
+          --fallback: #f0883e;
+        }
+      }
+
+      .title { font: 700 38px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--heading); }
+      .subtitle { font: 400 18px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--muted); }
+      .lane { font: 700 15px Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: 1.8px; fill: var(--lane); }
+      .box-title { font: 700 20px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--heading); }
+      .box-copy { font: 400 15px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--copy); }
+      .tag { font: 700 13px Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: .8px; }
+      .edge-label { font: 600 14px Inter, ui-sans-serif, system-ui, sans-serif; fill: var(--line); }
+      .edge { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .fallback { fill: none; stroke: var(--fallback); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 9 9; marker-end: url(#orange-arrow); }
+      .arrow-head { fill: var(--line); }
+      .orange-arrow-head { fill: var(--fallback); }
+      .box { filter: url(#shadow); stroke-width: 2; }
+      .source-box { fill: var(--source-fill); stroke: var(--source-stroke); }
+      .frontend-box { fill: var(--frontend-fill); stroke: var(--frontend-stroke); }
+      .verified-box { fill: var(--verified-fill); stroke: var(--verified-stroke); }
+      .runtime-box, .vm-box { fill: var(--blue-fill); stroke: var(--blue-stroke); }
+      .native-box { fill: var(--native-fill); stroke: var(--native-stroke); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="940" fill="var(--canvas)"/>
+  <rect x="38" y="32" width="1524" height="876" rx="28" fill="var(--panel)" stroke="var(--panel-stroke)" stroke-width="2"/>
+
+  <text x="82" y="94" class="title">EmberJIT: verified tiered execution</text>
+  <text x="82" y="126" class="subtitle">Portable bytecode execution remains valid while hot functions may safely enter the Windows x64 native tier.</text>
+
+  <text x="82" y="190" class="lane">LANGUAGE AND PORTABLE EXECUTION</text>
+  <line x1="82" y1="205" x2="1518" y2="205" stroke="var(--divider)" stroke-width="2"/>
+
+  <g>
+    <rect class="box source-box" x="82" y="244" width="185" height="94" rx="18"/>
+    <text x="174" y="281" text-anchor="middle" class="box-title">Ember source</text>
+    <text x="174" y="308" text-anchor="middle" class="box-copy">UTF-8 text file</text>
+  </g>
+  <g>
+    <rect class="box frontend-box" x="302" y="244" width="230" height="94" rx="18"/>
+    <text x="417" y="278" text-anchor="middle" class="box-title">Frontend</text>
+    <text x="417" y="306" text-anchor="middle" class="box-copy">lex • parse • type check</text>
+    <text x="417" y="328" text-anchor="middle" class="box-copy">resolved typed AST</text>
+  </g>
+  <g>
+    <rect class="box frontend-box" x="567" y="244" width="220" height="94" rx="18"/>
+    <text x="677" y="278" text-anchor="middle" class="box-title">Bytecode compiler</text>
+    <text x="677" y="306" text-anchor="middle" class="box-copy">typed AST → stack bytecode</text>
+  </g>
+  <g>
+    <rect class="box verified-box" x="822" y="244" width="220" height="94" rx="18"/>
+    <text x="932" y="278" text-anchor="middle" class="box-title">VerifiedProgram</text>
+    <text x="932" y="306" text-anchor="middle" class="box-copy">verified stack bytecode</text>
+  </g>
+  <g>
+    <rect class="box runtime-box" x="1077" y="232" width="350" height="118" rx="20" stroke-width="3"/>
+    <text x="1252" y="270" text-anchor="middle" class="box-title">Runtime dispatcher</text>
+    <text x="1252" y="299" text-anchor="middle" class="box-copy">invocation profiling</text>
+    <text x="1252" y="323" text-anchor="middle" class="box-copy">VM/native tier selection</text>
+  </g>
+
+  <path class="edge" d="M267 291 H302"/>
+  <path class="edge" d="M532 291 H567"/>
+  <path class="edge" d="M787 291 H822"/>
+  <path class="edge" d="M1042 291 H1077"/>
+  <rect x="868" y="214" width="128" height="28" rx="14" fill="var(--verified-tag-fill)"/>
+  <text x="932" y="233" text-anchor="middle" class="tag" fill="var(--verified-tag-text)">VERIFY</text>
+
+  <text x="82" y="422" class="lane">TIERED EXECUTION</text>
+  <line x1="82" y1="437" x2="1518" y2="437" stroke="var(--divider)" stroke-width="2"/>
+
+  <g>
+    <rect class="box vm-box" x="490" y="590" width="300" height="108" rx="20" stroke-width="3"/>
+    <text x="640" y="631" text-anchor="middle" class="box-title">Bytecode VM</text>
+    <text x="640" y="660" text-anchor="middle" class="box-copy">portable semantic baseline</text>
+    <text x="640" y="683" text-anchor="middle" class="box-copy">valid on every supported host</text>
+  </g>
+
+  <g>
+    <rect class="box verified-box" x="870" y="487" width="200" height="94" rx="18"/>
+    <text x="970" y="523" text-anchor="middle" class="box-title">IR lowering</text>
+    <text x="970" y="551" text-anchor="middle" class="box-copy">typed CFG IR</text>
+  </g>
+  <g>
+    <rect class="box verified-box" x="1115" y="487" width="200" height="94" rx="18"/>
+    <text x="1215" y="523" text-anchor="middle" class="box-title">Verified IR</text>
+    <text x="1215" y="551" text-anchor="middle" class="box-copy">trusted compiler input</text>
+  </g>
+  <g>
+    <rect class="box native-box" x="1360" y="487" width="150" height="94" rx="18"/>
+    <text x="1435" y="523" text-anchor="middle" class="box-title">Optimize</text>
+    <text x="1435" y="551" text-anchor="middle" class="box-copy">verified passes</text>
+  </g>
+  <g>
+    <rect class="box verified-box" x="980" y="650" width="260" height="94" rx="18"/>
+    <text x="1110" y="686" text-anchor="middle" class="box-title">Verified optimized IR</text>
+    <text x="1110" y="714" text-anchor="middle" class="box-copy">verifier-checked output</text>
+  </g>
+  <g>
+    <rect class="box native-box" x="1290" y="650" width="220" height="94" rx="18"/>
+    <text x="1400" y="686" text-anchor="middle" class="box-title">Baseline JIT</text>
+    <text x="1400" y="714" text-anchor="middle" class="box-copy">x86-64 emitter</text>
+  </g>
+  <g>
+    <rect class="box native-box" x="1290" y="786" width="220" height="76" rx="18" stroke-width="3"/>
+    <text x="1400" y="818" text-anchor="middle" class="box-title">NativeCodeHandle</text>
+    <text x="1400" y="841" text-anchor="middle" class="box-copy">RW → RX → flush → publish</text>
+  </g>
+
+  <path class="edge" d="M1210 350 C1135 394 1007 435 980 487"/>
+  <text x="1050" y="420" class="edge-label">hot function</text>
+  <path class="edge" d="M1070 534 H1115"/>
+  <path class="edge" d="M1315 534 H1360"/>
+  <path class="edge" d="M1435 581 C1435 617 1300 623 1240 661"/>
+  <path class="edge" d="M1240 697 H1290"/>
+  <path class="edge" d="M1400 744 V786"/>
+
+  <path class="edge" d="M1150 350 C1016 418 762 474 653 590"/>
+  <text x="820" y="480" class="edge-label">VM tier</text>
+
+  <path class="edge" d="M1410 350 C1528 402 1540 650 1510 809"/>
+  <text x="1482" y="423" text-anchor="middle" class="edge-label">native dispatch</text>
+
+  <path class="fallback" d="M1290 824 C1080 890 815 875 700 698"/>
+  <text x="1025" y="875" text-anchor="middle" class="edge-label" fill="var(--fallback)">failure: keep the VM valid</text>
+
+  <rect x="82" y="774" width="370" height="88" rx="18" fill="var(--note-fill)" stroke="var(--note-stroke)" stroke-width="2"/>
+  <text x="106" y="806" class="box-title" font-size="17">Execution invariant</text>
+  <text x="106" y="833" class="box-copy">Only verified bytecode enters the VM, and</text>
+  <text x="106" y="854" class="box-copy">only verified IR enters native compilation.</text>
+
+  <rect x="82" y="487" width="245" height="28" rx="14" fill="var(--verified-tag-fill)"/>
+  <text x="205" y="506" text-anchor="middle" class="tag" fill="var(--verified-tag-text)">VERIFIED BOUNDARY</text>
+  <rect x="82" y="535" width="245" height="28" rx="14" fill="var(--native-tag-fill)"/>
+  <text x="205" y="554" text-anchor="middle" class="tag" fill="var(--native-tag-text)">NATIVE WORK IN PROGRESS</text>
+</svg>
