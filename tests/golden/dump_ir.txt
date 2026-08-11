@@ -1,0 +1,9 @@
+fn #3 () -> i64
+  local %0: i64
+block b0:
+  branch b1
+block b1:
+  v0:i64 = const.i64 7
+  store %0, v0
+  v1:i64 = const.i64 7
+  return v1
