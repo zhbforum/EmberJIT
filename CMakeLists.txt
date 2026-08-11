@@ -11,6 +11,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(
+    EMBER_ENABLE_MSVC_ANALYZE
+    "Enable MSVC static code analysis"
+    OFF
+)
+
 function(ember_configure_compile_options target)
     if(MSVC)
         target_compile_options(${target} PRIVATE
@@ -26,6 +32,16 @@ function(ember_configure_compile_options target)
         -Wconversion
         -Wshadow
         )
+    endif()
+
+    if(EMBER_ENABLE_MSVC_ANALYZE)
+        if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            message(FATAL_ERROR
+                "EMBER_ENABLE_MSVC_ANALYZE requires the Microsoft C++ compiler"
+            )
+        endif()
+
+        target_compile_options(${target} PRIVATE /analyze)
     endif()
 endfunction()
 

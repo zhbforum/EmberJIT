@@ -61,8 +61,15 @@ std::uint64_t probeBridge(ember::jit::NativeFrame* caller,
         caller->errorCode = static_cast<std::uint64_t>(ember::jit::NativeFrameError::invalidCall);
         return static_cast<std::uint64_t>(ember::jit::NativeFrameError::invalidCall);
     }
-    if (!probe->expectsVoidResult)
+    if (!probe->expectsVoidResult) {
+        if (result == nullptr) {
+            caller->errorCode =
+                static_cast<std::uint64_t>(ember::jit::NativeFrameError::invalidCall);
+            return static_cast<std::uint64_t>(ember::jit::NativeFrameError::invalidCall);
+        }
+
         *result = 42U;
+    }
     return static_cast<std::uint64_t>(ember::jit::NativeFrameError::none);
 }
 
