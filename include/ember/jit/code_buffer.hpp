@@ -19,6 +19,7 @@ enum class CodeBufferError
     allocationFailed,
     protectionFailed,
     cacheFlushFailed,
+    testFailure,
 };
 
 class CodeBuffer;
@@ -40,8 +41,33 @@ class CodeBuffer
     [[nodiscard]] std::size_t size() const noexcept { return size_; }
 
   private:
+    enum class TestFailpoint
+    {
+        none,
+        afterAllocation,
+        afterWrite,
+        afterProtection,
+    };
+
+    enum class TestStage
+    {
+        none,
+        executableAllocated,
+        executableWritten,
+        executableProtected,
+    };
+
+    struct TestHooks
+    {
+        TestFailpoint failpoint{TestFailpoint::none};
+        TestStage *observedStage{};
+    };
+
     CodeBuffer(void *memory, std::size_t size) noexcept : memory_(memory), size_(size) {}
     [[nodiscard]] static CodeBufferCreateResult create(std::span<const std::byte> code) noexcept;
+    [[nodiscard]] static CodeBufferCreateResult
+    create(std::span<const std::byte> code, TestHooks testHooks) noexcept;
+    [[nodiscard]] static std::size_t liveExecutableAllocationCountForTesting() noexcept;
     void reset() noexcept;
 
     void *memory_{};

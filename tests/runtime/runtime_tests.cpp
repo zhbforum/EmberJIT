@@ -3,6 +3,8 @@
 #include "ember/runtime/native_value.hpp"
 #include "ember/runtime/vm.hpp"
 
+#include "jit/native_code_test_access.hpp"
+#include "runtime/runtime_function_test_access.hpp"
 #include "test_harness.hpp"
 
 #include <array>
@@ -1603,7 +1605,104 @@ EMBER_TEST("injected native compilation failure retains VM dispatch and result")
     const auto *function = vm.function(0);
     tests.expect(!report.result.error && report.result.value == ember::bytecode::Value{std::int64_t{42}} &&
                      function != nullptr && function->profiling().isHot &&
-                     function->tier() == ember::runtime::ExecutionTier::virtualMachine,
+                     function->tier() == ember::runtime::ExecutionTier::virtualMachine &&
+                     !ember::runtime::test::RuntimeFunctionAccess::hasNativeEntry(*function) &&
+                     ember::runtime::test::RuntimeFunctionAccess::nativeCompilationStage(*function) ==
+                         ember::runtime::NativeCompilationStage::compilerFailure,
                  "injected failure cannot publish a partial entry point or change the VM result");
+}
+
+EMBER_TEST("native lifecycle failpoints retain VM dispatch and release executable memory")
+{
+#if EMBER_HAS_WIN64_JIT
+    const auto makeProgram = [] {
+        return Program{.functions = {
+                           {.id = 0,
+                            .kind = FunctionKind::user,
+                            .signature = {.parameterTypes = {}, .returnType = Type::i64},
+                            .localCount = 0,
+                            .localTypes = {},
+                            .code = {{.opcode = Opcode::constant,
+                                      .operand = 0,
+                                      .value = ember::bytecode::Value{std::int64_t{42}}},
+                                     {.opcode = Opcode::returnValue,
+                                      .operand = 0,
+                                      .value = std::nullopt}}},
+                       }};
+    };
+    const auto expected = ember::bytecode::Value{std::int64_t{42}};
+    tests.expect(ember::runtime::test::NativeCodeHandleAccess::liveExecutableAllocationCount() == 0,
+                 "lifecycle test starts without a live executable allocation");
+
+    {
+        auto verified = verify(makeProgram());
+        if (!verified)
+        {
+            tests.expect(false, "native lifecycle control program verifies");
+            return;
+        }
+        auto vm = ember::runtime::VirtualMachine::create(
+            std::move(*verified), {.hotThreshold = 1, .jitEnabled = true, .profilingEnabled = true});
+        const auto report = vm.execute(0);
+        const auto *function = vm.function(0);
+        tests.expect(!report.result.error && report.result.value == expected && function != nullptr &&
+                         function->tier() == ember::runtime::ExecutionTier::native &&
+                         ember::runtime::test::RuntimeFunctionAccess::hasNativeEntry(*function) &&
+                         ember::runtime::test::RuntimeFunctionAccess::nativeCompilationStage(*function) ==
+                             ember::runtime::NativeCompilationStage::published,
+                     "control program reaches a published native entry");
+        tests.expect(ember::runtime::test::NativeCodeHandleAccess::liveExecutableAllocationCount() == 1,
+                     "published control entry owns one executable allocation");
+    }
+    tests.expect(ember::runtime::test::NativeCodeHandleAccess::liveExecutableAllocationCount() == 0,
+                 "destroyed VM releases the published executable allocation");
+
+    struct FailpointCase
+    {
+        ember::runtime::NativeCompilationFailpoint failpoint;
+        ember::runtime::NativeCompilationStage expectedStage;
+    };
+    constexpr std::array failpoints{
+        FailpointCase{ember::runtime::NativeCompilationFailpoint::afterLowering,
+                      ember::runtime::NativeCompilationStage::lowered},
+        FailpointCase{ember::runtime::NativeCompilationFailpoint::afterEmission,
+                      ember::runtime::NativeCompilationStage::emitted},
+        FailpointCase{ember::runtime::NativeCompilationFailpoint::afterExecutableAllocation,
+                      ember::runtime::NativeCompilationStage::executableAllocated},
+        FailpointCase{ember::runtime::NativeCompilationFailpoint::afterExecutableWrite,
+                      ember::runtime::NativeCompilationStage::executableWritten},
+        FailpointCase{ember::runtime::NativeCompilationFailpoint::afterExecutableProtection,
+                      ember::runtime::NativeCompilationStage::executableProtected},
+    };
+    for (const auto scenario : failpoints)
+    {
+        auto verified = verify(makeProgram());
+        if (!verified)
+        {
+            tests.expect(false, "native lifecycle failpoint program verifies");
+            return;
+        }
+        auto vm = ember::runtime::VirtualMachine::create(
+            std::move(*verified),
+            {.hotThreshold = 1,
+             .jitEnabled = true,
+             .profilingEnabled = true,
+             .nativeCompilationFailpointForTesting = scenario.failpoint});
+        const auto first = vm.execute(0);
+        const auto second = vm.execute(0);
+        const auto *function = vm.function(0);
+        tests.expect(!first.result.error && first.result.value == expected && !second.result.error &&
+                         second.result.value == expected && function != nullptr &&
+                         function->tier() == ember::runtime::ExecutionTier::virtualMachine &&
+                         !ember::runtime::test::RuntimeFunctionAccess::hasNativeEntry(*function) &&
+                         ember::runtime::test::RuntimeFunctionAccess::nativeCompilationStage(*function) ==
+                             scenario.expectedStage,
+                     "lifecycle failpoint keeps the entry on the VM path across repeated execution");
+        tests.expect(ember::runtime::test::NativeCodeHandleAccess::liveExecutableAllocationCount() == 0,
+                     "lifecycle failpoint leaves no temporary executable allocation");
+    }
+#else
+    tests.expect(true, "native lifecycle failpoints require the Win64 JIT target");
+#endif
 }
 } // namespace

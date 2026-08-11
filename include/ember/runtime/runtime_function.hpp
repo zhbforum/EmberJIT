@@ -13,6 +13,34 @@ namespace ember::runtime
 {
 class RuntimeDispatcher;
 class VirtualMachine;
+namespace test
+{
+class RuntimeFunctionAccess;
+}
+
+enum class NativeCompilationFailpoint
+{
+    none,
+    afterLowering,
+    afterEmission,
+    afterExecutableAllocation,
+    afterExecutableWrite,
+    afterExecutableProtection,
+};
+
+// Test-only observation of the furthest completed native compilation stage.
+enum class NativeCompilationStage
+{
+    none,
+    lowered,
+    compilerFailure,
+    emitted,
+    executableAllocated,
+    executableWritten,
+    executableProtected,
+    published,
+};
+
 enum class ExecutionTier
 {
     virtualMachine,
@@ -48,11 +76,17 @@ class RuntimeFunction
     [[nodiscard]] const ProfilingCounters &profiling() const noexcept { return profiling_; }
 
   private:
+    struct NativeCompilationTestOptions
+    {
+        bool forceCompilerFailure{};
+        NativeCompilationFailpoint failpoint{NativeCompilationFailpoint::none};
+    };
+
     // The dispatcher is the sole owner of profiling mutation and tier
     // selection. This prevents callers from bypassing the common call path.
     [[nodiscard]] bool recordInvocation(std::uint64_t hotThreshold) noexcept;
     [[nodiscard]] ExecutionTier selectExecutionTier(bool jitEnabled) const noexcept;
-    [[nodiscard]] bool compileBaselineNative(bool forceFailureForTesting = false,
+    [[nodiscard]] bool compileBaselineNative(NativeCompilationTestOptions testOptions,
                                              bool disableOptimizationForTesting = false);
     [[nodiscard]] NativeInvocation invokeNativeWordFrame(std::vector<std::uint64_t> &locals,
                                                           void *callContext,
@@ -66,8 +100,10 @@ class RuntimeFunction
     std::shared_ptr<const bytecode::VerifiedProgram> nativeSource_;
     std::shared_ptr<const NativeCodeHandle> nativeCode_;
     jit::x64::NativeFrameRequirements nativeFrameRequirements_{};
+    NativeCompilationStage nativeCompilationStageForTesting_{NativeCompilationStage::none};
 
     friend class RuntimeDispatcher;
     friend class VirtualMachine;
+    friend class test::RuntimeFunctionAccess;
 };
 } // namespace ember::runtime

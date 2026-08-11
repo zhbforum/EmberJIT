@@ -30,15 +30,20 @@ ExecutionTier RuntimeFunction::selectExecutionTier(bool jitEnabled) const noexce
                : ExecutionTier::virtualMachine;
 }
 
-bool RuntimeFunction::compileBaselineNative(bool forceFailureForTesting,
+bool RuntimeFunction::compileBaselineNative(NativeCompilationTestOptions testOptions,
                                             bool disableOptimizationForTesting)
 {
     if (nativeCode_ || !nativeSource_)
         return nativeCode_ != nullptr;
 
+    const auto failpoint = testOptions.failpoint;
     auto lowered = ir::Lowerer{}.lower(*nativeSource_, bytecode_.id);
     if (!lowered.function)
         return false;
+    nativeCompilationStageForTesting_ = NativeCompilationStage::lowered;
+    if (failpoint == NativeCompilationFailpoint::afterLowering)
+        return false;
+
     if (!disableOptimizationForTesting)
     {
         auto optimized = ir::OptimizationPipeline{}.run(*lowered.function);
@@ -47,19 +52,66 @@ bool RuntimeFunction::compileBaselineNative(bool forceFailureForTesting,
         lowered.function = std::move(optimized.function);
     }
     auto compiled = jit::x64::BaselineCompiler{
-        {.forceFailureForTesting = forceFailureForTesting}}
+        {.forceFailureForTesting = testOptions.forceCompilerFailure}}
                         .compile(*lowered.function);
     if (!compiled.code)
+    {
+        if (testOptions.forceCompilerFailure &&
+            compiled.error == jit::x64::BaselineCompileError::emissionFailed)
+        {
+            nativeCompilationStageForTesting_ = NativeCompilationStage::compilerFailure;
+        }
         return false;
-    auto published = NativeCodeHandle::publishWordFrame(std::move(*compiled.code));
+    }
+    nativeCompilationStageForTesting_ = NativeCompilationStage::emitted;
+    if (failpoint == NativeCompilationFailpoint::afterEmission)
+        return false;
+
+    auto publicationFailpoint = NativeCodeHandle::PublicationFailpointForTesting::none;
+    switch (failpoint)
+    {
+    case NativeCompilationFailpoint::none:
+    case NativeCompilationFailpoint::afterLowering:
+    case NativeCompilationFailpoint::afterEmission:
+        break;
+    case NativeCompilationFailpoint::afterExecutableAllocation:
+        publicationFailpoint = NativeCodeHandle::PublicationFailpointForTesting::afterExecutableAllocation;
+        break;
+    case NativeCompilationFailpoint::afterExecutableWrite:
+        publicationFailpoint = NativeCodeHandle::PublicationFailpointForTesting::afterExecutableWrite;
+        break;
+    case NativeCompilationFailpoint::afterExecutableProtection:
+        publicationFailpoint = NativeCodeHandle::PublicationFailpointForTesting::afterExecutableProtection;
+        break;
+    }
+    auto publicationStage = NativeCodeHandle::PublicationStageForTesting::none;
+    auto published = NativeCodeHandle::publishWordFrameWithFailpointForTesting(
+        std::move(*compiled.code), publicationFailpoint, &publicationStage);
     if (!published.handle)
+    {
+        switch (publicationStage)
+        {
+        case NativeCodeHandle::PublicationStageForTesting::none:
+            break;
+        case NativeCodeHandle::PublicationStageForTesting::executableAllocated:
+            nativeCompilationStageForTesting_ = NativeCompilationStage::executableAllocated;
+            break;
+        case NativeCodeHandle::PublicationStageForTesting::executableWritten:
+            nativeCompilationStageForTesting_ = NativeCompilationStage::executableWritten;
+            break;
+        case NativeCodeHandle::PublicationStageForTesting::executableProtected:
+            nativeCompilationStageForTesting_ = NativeCompilationStage::executableProtected;
+            break;
+        }
         return false;
+    }
 
     auto handle = std::make_shared<const NativeCodeHandle>(std::move(*published.handle));
     nativeFrameRequirements_ = compiled.frameRequirements;
     nativeCode_ = std::move(handle);
     nativeSource_.reset();
     tier_ = ExecutionTier::native;
+    nativeCompilationStageForTesting_ = NativeCompilationStage::published;
     return true;
 }
 

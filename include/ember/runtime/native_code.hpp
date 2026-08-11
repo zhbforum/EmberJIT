@@ -11,6 +11,7 @@
 
 namespace ember::runtime
 {
+class RuntimeFunction;
 namespace test
 {
 class NativeCodeHandleAccess;
@@ -52,12 +53,33 @@ class NativeCodeHandle
     [[nodiscard]] std::size_t codeSize() const noexcept { return code_.size(); }
 
   private:
+    enum class PublicationFailpointForTesting
+    {
+        none,
+        afterExecutableAllocation,
+        afterExecutableWrite,
+        afterExecutableProtection,
+    };
+
+    enum class PublicationStageForTesting
+    {
+        none,
+        executableAllocated,
+        executableWritten,
+        executableProtected,
+    };
+
     explicit NativeCodeHandle(jit::CodeBuffer code) noexcept : code_(std::move(code)) {}
     [[nodiscard]] void *entryAddress() const noexcept { return code_.memory_; }
+    [[nodiscard]] static NativeCodeCreateResult publishWordFrameWithFailpointForTesting(
+        jit::x64::MachineCode machineCode, PublicationFailpointForTesting failpoint,
+        PublicationStageForTesting *observedStage) noexcept;
+    [[nodiscard]] static std::size_t liveExecutableAllocationCountForTesting() noexcept;
 
     jit::CodeBuffer code_;
 
     friend class test::NativeCodeHandleAccess;
+    friend class RuntimeFunction;
 };
 
 struct NativeCodeCreateResult

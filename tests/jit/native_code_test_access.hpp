@@ -11,5 +11,10 @@ class NativeCodeHandleAccess
     {
         return handle.entryAddress();
     }
+
+    [[nodiscard]] static std::size_t liveExecutableAllocationCount() noexcept
+    {
+        return NativeCodeHandle::liveExecutableAllocationCountForTesting();
+    }
 };
 } // namespace ember::runtime::test

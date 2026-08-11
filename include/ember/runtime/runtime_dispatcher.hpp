@@ -26,6 +26,9 @@ struct RuntimeOptions
     // Test-only fault injection. It proves failed compilation leaves the VM
     // entry point intact; no command-line option exposes this behavior.
     bool forceNativeCompilationFailureForTesting{};
+    // Test-only lifecycle failpoint. It is intentionally unavailable to the
+    // CLI and lets hardening tests inspect cleanup before native publication.
+    NativeCompilationFailpoint nativeCompilationFailpointForTesting{};
     // Test-only seam for VM/unoptimized-native/optimized-native differential
     // tests. Production dispatch always enables the optimization pipeline.
     bool disableOptimizationForTesting{};
