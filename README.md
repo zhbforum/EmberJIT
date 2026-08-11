@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
 </p>
 
-> **Status:** EmberJIT v0.1 is feature-complete and currently being prepared for its first public release.
+> **Status:** EmberJIT v0.1.0 is the first public release of the project.
 
 EmberJIT is a small end-to-end language implementation built around a bytecode virtual machine and a tiered baseline JIT.
 
