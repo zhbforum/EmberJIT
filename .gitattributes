@@ -1,11 +1,23 @@
+# Normalize text files in the repository.
 * text=auto
 
-.gitattributes text eol=lf
-*.cpp text eol=lf
-*.hpp text eol=lf
-*.cmake text eol=lf
-*.ember text eol=lf
-*.expected text eol=lf
+# Source and build configuration.
+*.cpp      text eol=lf
+*.hpp      text eol=lf
+*.cmake    text eol=lf
 CMakeLists.txt text eol=lf
-*.yml text eol=lf
-*.md text eol=lf
+
+# Ember sources and test data.
+*.ember    text eol=lf
+*.expected text eol=lf
+*.txt      text eol=lf
+
+# Repository configuration and documentation.
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.md       text eol=lf
+*.json     text eol=lf
+
+# Tool configuration.
+.clang-format text eol=lf
+.gitattributes text eol=lf
