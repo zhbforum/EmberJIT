@@ -88,6 +88,14 @@ add_library(ember_ir
 target_link_libraries(ember_ir PUBLIC ember_bytecode)
 ember_configure_compile_options(ember_ir)
 
+add_library(ember_ssa
+    src/ssa/ssa.cpp
+    src/ssa/verifier.cpp
+    src/ssa/dump.cpp
+)
+target_link_libraries(ember_ssa PUBLIC ember_semantic)
+ember_configure_compile_options(ember_ssa)
+
 add_library(ember_jit
     src/jit/baseline_compiler.cpp
     src/jit/code_buffer.cpp
@@ -257,12 +265,13 @@ if(BUILD_TESTING)
         tests/semantic/analyzer_tests.cpp
         tests/bytecode/bytecode_tests.cpp
         tests/ir/ir_tests.cpp
+        tests/ssa/ssa_tests.cpp
         tests/jit/baseline_compiler_tests.cpp
         tests/jit/emitter_tests.cpp
         tests/runtime/runtime_tests.cpp
     )
 
-    target_link_libraries(ember_tests PRIVATE ember_runtime ember_ir)
+    target_link_libraries(ember_tests PRIVATE ember_runtime ember_ir ember_ssa)
     target_include_directories(ember_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
     )
