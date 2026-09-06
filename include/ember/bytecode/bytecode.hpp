@@ -1,17 +1,16 @@
 #pragma once
 
-#include "ember/semantic/typed_ast.hpp"
+#include "ember/core/function.hpp"
+#include "ember/core/value.hpp"
 #include "ember/support/diagnostic.hpp"
 
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <variant>
+#include <utility>
 #include <vector>
 
 namespace ember::bytecode {
-using Value = std::variant<std::int64_t, double, bool>;
-
 enum class Opcode : std::uint8_t {
     constant,
     load,
@@ -52,22 +51,18 @@ enum class Opcode : std::uint8_t {
 struct Instruction {
     Opcode opcode;
     std::uint32_t operand{}; // local slot, instruction target, or function id
-    std::optional<Value> value;
+    std::optional<core::Value> value;
 };
 struct Function {
-    semantic::FunctionId id;
-    semantic::FunctionKind kind{semantic::FunctionKind::user};
-    semantic::FunctionSignature signature;
+    core::FunctionId id;
+    core::FunctionKind kind{core::FunctionKind::user};
+    core::FunctionSignature signature;
     std::uint32_t localCount{};
-    std::vector<semantic::Type> localTypes;
+    std::vector<core::Type> localTypes;
     std::vector<Instruction> code;
 };
 struct Program {
     std::vector<Function> functions;
-};
-struct CompileResult {
-    std::optional<Program> program;
-    std::vector<support::Diagnostic> diagnostics;
 };
 class VerifiedProgram {
 public:
@@ -96,11 +91,6 @@ struct VerifyResult {
     std::vector<support::Diagnostic> diagnostics;
 };
 
-class Compiler {
-public:
-    // Precondition: program was returned successfully by SemanticAnalyzer.
-    [[nodiscard]] CompileResult compile(const semantic::TypedProgram& program) const;
-};
 class Verifier {
 public:
     [[nodiscard]] VerifyResult verify(Program program) const;

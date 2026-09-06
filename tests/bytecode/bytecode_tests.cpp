@@ -1,19 +1,40 @@
 #include "ember/bytecode/builtins.hpp"
 #include "ember/bytecode/bytecode.hpp"
+#include "ember/bytecode/lowering.hpp"
+#include "ember/core/function.hpp"
+#include "ember/core/type.hpp"
+#include "ember/core/value.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
+#include "ember/integration/builtin_registration.hpp"
 #include "ember/runtime/vm.hpp"
 #include "ember/semantic/analyzer.hpp"
+#include "ember/support/source.hpp"
+#include "ember/support/source_location.hpp"
 
 #include "test_harness.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
 
 namespace {
+[[nodiscard]] auto malformedOpcodeValue() noexcept -> ember::bytecode::Opcode {
+    // An arbitrary byte can arrive from a corrupted bytecode payload. Opcode
+    // has a fixed underlying type, so this conversion is well-defined.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    return static_cast<ember::bytecode::Opcode>(std::uint8_t{255});
+}
+
 struct CompiledProgram {
     ember::bytecode::CompileResult compilation;
-    ember::semantic::FunctionId mainId{};
+    ember::core::FunctionId mainId{};
 };
 
 [[nodiscard]] auto compile(std::string code,
@@ -27,18 +48,18 @@ struct CompiledProgram {
         return CompiledProgram{};
 
     ember::semantic::HostFunctionRegistry hosts;
-    if (registerRuntimeBuiltins && !ember::bytecode::registerBuiltins(hosts))
+    if (registerRuntimeBuiltins && !ember::integration::registerBuiltins(hosts))
         return CompiledProgram{};
     const auto typed = ember::semantic::SemanticAnalyzer{}.analyze(*ast.program, source, hosts);
     if (!typed.diagnostics.empty() || !typed.program)
         return CompiledProgram{};
 
-    const auto main = std::find_if(
-        typed.program->functions.begin(),
-        typed.program->functions.end(),
-        [](const auto& function) {
-            return function.kind == ember::semantic::FunctionKind::user && function.name == "main";
-        });
+    const auto main = std::find_if(typed.program->functions.begin(),
+                                   typed.program->functions.end(),
+                                   [](const auto& function) {
+                                       return function.kind == ember::core::FunctionKind::user &&
+                                              function.name == "main";
+                                   });
     if (main == typed.program->functions.end())
         return CompiledProgram{};
 
@@ -82,8 +103,8 @@ EMBER_TEST("verifier rejects malformed jump before VM construction") {
     ember::bytecode::Program program{
         .functions = {
             {.id = 0,
-             .kind = ember::semantic::FunctionKind::user,
-             .signature = {.parameterTypes = {}, .returnType = ember::semantic::Type::voidType},
+             .kind = ember::core::FunctionKind::user,
+             .signature = {.parameterTypes = {}, .returnType = ember::core::Type::voidType},
              .localCount = 0,
              .localTypes = {},
              .code = {
@@ -207,21 +228,20 @@ EMBER_TEST("VM validates its public entry-point arguments") {
 
 EMBER_TEST("verifier preserves unary and boolean opcode semantics") {
     ember::bytecode::Program unary{
-        .functions = {
-            {.id = 0,
-             .kind = ember::semantic::FunctionKind::user,
-             .signature = {.parameterTypes = {}, .returnType = ember::semantic::Type::i64},
-             .localCount = 0,
-             .localTypes = {},
-             .code = {{.opcode = ember::bytecode::Opcode::constant,
-                       .operand = 0,
-                       .value = ember::bytecode::Value{std::int64_t{1}}},
-                      {.opcode = ember::bytecode::Opcode::negateI64,
-                       .operand = 0,
-                       .value = std::nullopt},
-                      {.opcode = ember::bytecode::Opcode::returnValue,
-                       .operand = 0,
-                       .value = std::nullopt}}}}};
+        .functions = {{.id = 0,
+                       .kind = ember::core::FunctionKind::user,
+                       .signature = {.parameterTypes = {}, .returnType = ember::core::Type::i64},
+                       .localCount = 0,
+                       .localTypes = {},
+                       .code = {{.opcode = ember::bytecode::Opcode::constant,
+                                 .operand = 0,
+                                 .value = ember::core::Value{std::int64_t{1}}},
+                                {.opcode = ember::bytecode::Opcode::negateI64,
+                                 .operand = 0,
+                                 .value = std::nullopt},
+                                {.opcode = ember::bytecode::Opcode::returnValue,
+                                 .operand = 0,
+                                 .value = std::nullopt}}}}};
     auto unaryVerified = ember::bytecode::Verifier{}.verify(std::move(unary));
     tests.expect(unaryVerified.program.has_value(), "i64 unary negation verifies");
     if (!unaryVerified.program)
@@ -246,9 +266,9 @@ EMBER_TEST("verifier validates binary operand and result types") {
     using ember::bytecode::Instruction;
     using ember::bytecode::Opcode;
     using ember::bytecode::Program;
-    using ember::bytecode::Value;
-    using ember::semantic::FunctionKind;
-    using ember::semantic::Type;
+    using ember::core::FunctionKind;
+    using ember::core::Type;
+    using ember::core::Value;
 
     const auto makeFunction = [](Type returnType, std::vector<Instruction> code) {
         return Program{.functions = {{.id = 0,
@@ -314,9 +334,9 @@ EMBER_TEST("verifier validates binary operand and result types") {
 EMBER_TEST("verifier rejects unsafe local layouts and malformed opcodes") {
     const ember::bytecode::Function unsafeLocal{
         .id = 0,
-        .kind = ember::semantic::FunctionKind::user,
-        .signature = {.parameterTypes = {ember::semantic::Type::i64},
-                      .returnType = ember::semantic::Type::voidType},
+        .kind = ember::core::FunctionKind::user,
+        .signature = {.parameterTypes = {ember::core::Type::i64},
+                      .returnType = ember::core::Type::voidType},
         .localCount = 0,
         .localTypes = {},
         .code = {{.opcode = ember::bytecode::Opcode::returnVoid,
@@ -328,23 +348,21 @@ EMBER_TEST("verifier rejects unsafe local layouts and malformed opcodes") {
 
     const ember::bytecode::Function unknownOpcode{
         .id = 0,
-        .kind = ember::semantic::FunctionKind::user,
-        .signature = {.parameterTypes = {}, .returnType = ember::semantic::Type::voidType},
+        .kind = ember::core::FunctionKind::user,
+        .signature = {.parameterTypes = {}, .returnType = ember::core::Type::voidType},
         .localCount = 0,
         .localTypes = {},
-        .code = {{.opcode = static_cast<ember::bytecode::Opcode>(255),
-                  .operand = 0,
-                  .value = std::nullopt}},
+        .code = {{.opcode = malformedOpcodeValue(), .operand = 0, .value = std::nullopt}},
     };
     const auto unknownResult = ember::bytecode::Verifier{}.verify({.functions = {unknownOpcode}});
     tests.expect(!unknownResult.program.has_value(), "unknown opcode is rejected");
 
     const ember::bytecode::Function uninitializedLoad{
         .id = 0,
-        .kind = ember::semantic::FunctionKind::user,
-        .signature = {.parameterTypes = {}, .returnType = ember::semantic::Type::i64},
+        .kind = ember::core::FunctionKind::user,
+        .signature = {.parameterTypes = {}, .returnType = ember::core::Type::i64},
         .localCount = 1,
-        .localTypes = {ember::semantic::Type::i64},
+        .localTypes = {ember::core::Type::i64},
         .code = {{.opcode = ember::bytecode::Opcode::load, .operand = 0, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::returnValue,
                   .operand = 0,
@@ -359,8 +377,8 @@ EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructio
     using ember::bytecode::Instruction;
     using ember::bytecode::Opcode;
     using ember::bytecode::Program;
-    using ember::semantic::FunctionKind;
-    using ember::semantic::Type;
+    using ember::core::FunctionKind;
+    using ember::core::Type;
 
     const auto makeFunction = [](std::vector<Instruction> code) {
         return Program{
@@ -373,11 +391,9 @@ EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructio
     };
 
     const auto incompatibleMerge = ember::bytecode::Verifier{}.verify(makeFunction(
-        {{.opcode = Opcode::constant, .operand = 0, .value = ember::bytecode::Value{true}},
+        {{.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{true}},
          {.opcode = Opcode::jumpIfFalse, .operand = 4, .value = std::nullopt},
-         {.opcode = Opcode::constant,
-          .operand = 0,
-          .value = ember::bytecode::Value{std::int64_t{1}}},
+         {.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{std::int64_t{1}}},
          {.opcode = Opcode::jump, .operand = 5, .value = std::nullopt},
          {.opcode = Opcode::jump, .operand = 5, .value = std::nullopt},
          {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}));
@@ -391,10 +407,9 @@ EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructio
              .signature = {.parameterTypes = {}, .returnType = Type::voidType},
              .localCount = 0,
              .localTypes = {},
-             .code =
-                 {{.opcode = Opcode::constant, .operand = 0, .value = ember::bytecode::Value{true}},
-                  {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
-                  {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}},
+             .code = {{.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{true}},
+                      {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
+                      {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}},
             {.id = 1,
              .kind = FunctionKind::user,
              .signature = {.parameterTypes = {Type::i64}, .returnType = Type::voidType},
@@ -414,66 +429,52 @@ EMBER_TEST("verifier rejects malformed merges, calls, and unreachable instructio
                  "unreachable instructions must still be well-formed");
 }
 
-EMBER_TEST("verifier rejects invalid returns, kinds, types, and host payloads") {
-    const auto makeFunction = [](ember::semantic::Type returnType,
+EMBER_TEST("verifier rejects invalid returns and host payloads") {
+    const auto makeFunction = [](ember::core::Type returnType,
                                  std::vector<ember::bytecode::Instruction> code) {
         return ember::bytecode::Program{
             .functions = {{.id = 0,
-                           .kind = ember::semantic::FunctionKind::user,
+                           .kind = ember::core::FunctionKind::user,
                            .signature = {.parameterTypes = {}, .returnType = returnType},
                            .localCount = 0,
                            .localTypes = {},
                            .code = std::move(code)}}};
     };
     tests.expect(!ember::bytecode::Verifier{}
-                      .verify(makeFunction(ember::semantic::Type::voidType,
+                      .verify(makeFunction(ember::core::Type::voidType,
                                            {{.opcode = ember::bytecode::Opcode::returnValue,
                                              .operand = 0,
                                              .value = std::nullopt}}))
                       .program.has_value(),
                  "void returnValue is rejected");
     tests.expect(!ember::bytecode::Verifier{}
-                      .verify(makeFunction(ember::semantic::Type::i64,
+                      .verify(makeFunction(ember::core::Type::i64,
                                            {{.opcode = ember::bytecode::Opcode::returnVoid,
                                              .operand = 0,
                                              .value = std::nullopt}}))
                       .program.has_value(),
                  "non-void returnVoid is rejected");
     tests.expect(!ember::bytecode::Verifier{}
-                      .verify(makeFunction(ember::semantic::Type::i64,
+                      .verify(makeFunction(ember::core::Type::i64,
                                            {{.opcode = ember::bytecode::Opcode::constant,
                                              .operand = 0,
-                                             .value = ember::bytecode::Value{std::int64_t{1}}},
+                                             .value = ember::core::Value{std::int64_t{1}}},
                                             {.opcode = ember::bytecode::Opcode::constant,
                                              .operand = 0,
-                                             .value = ember::bytecode::Value{std::int64_t{2}}},
+                                             .value = ember::core::Value{std::int64_t{2}}},
                                             {.opcode = ember::bytecode::Opcode::returnValue,
                                              .operand = 0,
                                              .value = std::nullopt}}))
                       .program.has_value(),
                  "return with residual stack values is rejected");
 
-    auto invalidKind = makeFunction(
-        ember::semantic::Type::voidType,
-        {{.opcode = ember::bytecode::Opcode::returnVoid, .operand = 0, .value = std::nullopt}});
-    invalidKind.functions.front().kind = static_cast<ember::semantic::FunctionKind>(255);
-    tests.expect(!ember::bytecode::Verifier{}.verify(std::move(invalidKind)).program.has_value(),
-                 "invalid function kind is rejected");
-
-    auto invalidType = makeFunction(
-        ember::semantic::Type::voidType,
-        {{.opcode = ember::bytecode::Opcode::returnVoid, .operand = 0, .value = std::nullopt}});
-    invalidType.functions.front().signature.returnType = static_cast<ember::semantic::Type>(255);
-    tests.expect(!ember::bytecode::Verifier{}.verify(std::move(invalidType)).program.has_value(),
-                 "invalid semantic type is rejected");
-
     ember::bytecode::Program malformedHost{
         .functions = {{.id = 0,
-                       .kind = ember::semantic::FunctionKind::host,
-                       .signature = {.parameterTypes = {ember::semantic::Type::i64},
-                                     .returnType = ember::semantic::Type::voidType},
+                       .kind = ember::core::FunctionKind::host,
+                       .signature = {.parameterTypes = {ember::core::Type::i64},
+                                     .returnType = ember::core::Type::voidType},
                        .localCount = 1,
-                       .localTypes = {ember::semantic::Type::i64},
+                       .localTypes = {ember::core::Type::i64},
                        .code = {{.opcode = ember::bytecode::Opcode::returnVoid,
                                  .operand = 0,
                                  .value = std::nullopt}}}}};
@@ -481,12 +482,27 @@ EMBER_TEST("verifier rejects invalid returns, kinds, types, and host payloads") 
                  "host payload is rejected");
 }
 
+EMBER_TEST("builtin descriptors have unique function IDs and names") {
+    std::unordered_set<ember::core::FunctionId> identifiers;
+    std::unordered_set<std::string_view> names;
+    bool uniqueIdentifiers = true;
+    bool uniqueNames = true;
+
+    for (const auto& builtin : ember::bytecode::builtins()) {
+        uniqueIdentifiers = identifiers.insert(builtin.id).second && uniqueIdentifiers;
+        uniqueNames = names.insert(builtin.name).second && uniqueNames;
+    }
+
+    tests.expect(uniqueIdentifiers, "builtin descriptors have unique function IDs");
+    tests.expect(uniqueNames, "builtin descriptors have unique names");
+}
+
 EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero") {
     ember::bytecode::Program recursion{
         .functions = {
             {.id = 0,
-             .kind = ember::semantic::FunctionKind::user,
-             .signature = {.parameterTypes = {}, .returnType = ember::semantic::Type::i64},
+             .kind = ember::core::FunctionKind::user,
+             .signature = {.parameterTypes = {}, .returnType = ember::core::Type::i64},
              .localCount = 0,
              .localTypes = {},
              .code = {
@@ -509,16 +525,16 @@ EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero") {
     ember::bytecode::Program targetZero{
         .functions = {
             {.id = 0,
-             .kind = ember::semantic::FunctionKind::user,
-             .signature = {.parameterTypes = {ember::semantic::Type::i64},
-                           .returnType = ember::semantic::Type::i64},
+             .kind = ember::core::FunctionKind::user,
+             .signature = {.parameterTypes = {ember::core::Type::i64},
+                           .returnType = ember::core::Type::i64},
              .localCount = 1,
-             .localTypes = {ember::semantic::Type::i64},
+             .localTypes = {ember::core::Type::i64},
              .code = {
                  {.opcode = ember::bytecode::Opcode::load, .operand = 0, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::constant,
                   .operand = 0,
-                  .value = ember::bytecode::Value{std::int64_t{0}}},
+                  .value = ember::core::Value{std::int64_t{0}}},
                  {.opcode = ember::bytecode::Opcode::greaterI64,
                   .operand = 0,
                   .value = std::nullopt},
@@ -528,7 +544,7 @@ EMBER_TEST("VM enforces frame limit and executes a jump to instruction zero") {
                  {.opcode = ember::bytecode::Opcode::load, .operand = 0, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::constant,
                   .operand = 0,
-                  .value = ember::bytecode::Value{std::int64_t{1}}},
+                  .value = ember::core::Value{std::int64_t{1}}},
                  {.opcode = ember::bytecode::Opcode::subI64, .operand = 0, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::store, .operand = 0, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::jump, .operand = 0, .value = std::nullopt},
