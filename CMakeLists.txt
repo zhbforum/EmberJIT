@@ -45,6 +45,13 @@ function(ember_configure_compile_options target)
     endif()
 endfunction()
 
+add_library(ember_core INTERFACE)
+
+target_include_directories(ember_core
+    INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 add_library(ember_support
     src/support/source.cpp
 )
@@ -69,31 +76,61 @@ add_library(ember_semantic
     src/semantic/analyzer.cpp
     src/semantic/typed_ast_printer.cpp
 )
-target_link_libraries(ember_semantic PUBLIC ember_frontend)
+target_link_libraries(ember_semantic PUBLIC ember_core ember_frontend)
 ember_configure_compile_options(ember_semantic)
 
 add_library(ember_bytecode
     src/bytecode/bytecode.cpp
 )
-target_link_libraries(ember_bytecode PUBLIC ember_semantic)
+target_link_libraries(ember_bytecode PUBLIC ember_core ember_support)
 ember_configure_compile_options(ember_bytecode)
+
+add_library(ember_bytecode_lowering
+    src/bytecode/lowering.cpp
+)
+target_link_libraries(ember_bytecode_lowering
+    PUBLIC
+        ember_bytecode
+    PRIVATE
+        ember_semantic
+)
+ember_configure_compile_options(ember_bytecode_lowering)
+
+add_library(ember_builtin_integration
+    src/integration/builtin_registration.cpp
+)
+target_link_libraries(ember_builtin_integration
+    PRIVATE
+        ember_bytecode
+        ember_semantic
+)
+target_include_directories(ember_builtin_integration
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+ember_configure_compile_options(ember_builtin_integration)
 
 add_library(ember_ir
     src/ir/ir.cpp
     src/ir/verifier.cpp
-    src/ir/bytecode_lowerer.cpp
     src/ir/dump.cpp
     src/ir/optimization.cpp
 )
-target_link_libraries(ember_ir PUBLIC ember_bytecode)
+target_link_libraries(ember_ir PUBLIC ember_core ember_support)
 ember_configure_compile_options(ember_ir)
+
+add_library(ember_ir_lowering
+    src/ir/bytecode_lowerer.cpp
+)
+target_link_libraries(ember_ir_lowering PUBLIC ember_ir ember_bytecode)
+ember_configure_compile_options(ember_ir_lowering)
 
 add_library(ember_ssa
     src/ssa/ssa.cpp
     src/ssa/verifier.cpp
     src/ssa/dump.cpp
 )
-target_link_libraries(ember_ssa PUBLIC ember_semantic)
+target_link_libraries(ember_ssa PUBLIC ember_core ember_support)
 ember_configure_compile_options(ember_ssa)
 
 add_library(ember_jit
@@ -101,7 +138,14 @@ add_library(ember_jit
     src/jit/code_buffer.cpp
     src/jit/emitter.cpp
 )
-target_link_libraries(ember_jit PUBLIC ember_support ember_ir)
+target_link_libraries(ember_jit
+    PUBLIC
+        ember_core
+        ember_support
+        ember_ir
+    PRIVATE
+        ember_bytecode
+)
 ember_configure_compile_options(ember_jit)
 
 add_library(ember_runtime
@@ -112,14 +156,28 @@ add_library(ember_runtime
     src/runtime/native_value.cpp
     src/runtime/vm.cpp
 )
-target_link_libraries(ember_runtime PUBLIC ember_bytecode ember_ir ember_jit)
+target_link_libraries(ember_runtime
+    PUBLIC
+        ember_core
+        ember_bytecode
+        ember_jit
+    PRIVATE
+        ember_ir_lowering
+)
 ember_configure_compile_options(ember_runtime)
 
 add_executable(ember
     src/main.cpp
 )
 
-target_link_libraries(ember PRIVATE ember_runtime ember_ir)
+target_link_libraries(ember
+    PRIVATE
+        ember_runtime
+        ember_semantic
+        ember_ir_lowering
+        ember_bytecode_lowering
+        ember_builtin_integration
+)
 ember_configure_compile_options(ember)
 
 option(EMBER_BUILD_BENCHMARKS "Build Ember runtime benchmarks" OFF)
@@ -138,6 +196,14 @@ if(BUILD_TESTING)
     set(ember_example_directory "${CMAKE_CURRENT_SOURCE_DIR}/examples")
     set(ember_fixture_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     set(ember_test_script_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    set(
+        ember_architecture_directory
+        "${ember_test_script_directory}/architecture"
+    )
+    set(
+        ember_architecture_test_script
+        "${ember_architecture_directory}/assert_header_dependencies.cmake"
+    )
     set(
         ember_deterministic_output_script
         "${ember_test_script_directory}/assert_deterministic_output.cmake"
@@ -271,11 +337,68 @@ if(BUILD_TESTING)
         tests/runtime/runtime_tests.cpp
     )
 
-    target_link_libraries(ember_tests PRIVATE ember_runtime ember_ir ember_ssa)
+    target_link_libraries(ember_tests
+        PRIVATE
+            ember_runtime
+            ember_semantic
+            ember_ir_lowering
+            ember_ssa
+            ember_bytecode_lowering
+            ember_builtin_integration
+    )
     target_include_directories(ember_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
     )
     ember_configure_compile_options(ember_tests)
+
+    add_library(ember_core_headers_compile OBJECT
+        tests/architecture/core_type_header_compile.cpp
+        tests/architecture/core_value_header_compile.cpp
+        tests/architecture/core_function_header_compile.cpp
+    )
+    target_link_libraries(ember_core_headers_compile PRIVATE ember_core)
+    ember_configure_compile_options(ember_core_headers_compile)
+
+    add_library(ember_bytecode_lowering_header_compile OBJECT
+        tests/architecture/bytecode_lowering_header_compile.cpp
+    )
+    target_link_libraries(ember_bytecode_lowering_header_compile
+        PRIVATE ember_bytecode_lowering
+    )
+    ember_configure_compile_options(ember_bytecode_lowering_header_compile)
+
+    add_library(ember_builtin_integration_header_compile OBJECT
+        tests/architecture/builtin_registration_header_compile.cpp
+    )
+    target_link_libraries(ember_builtin_integration_header_compile
+        PRIVATE ember_builtin_integration
+    )
+    ember_configure_compile_options(ember_builtin_integration_header_compile)
+
+    add_library(ember_native_value_header_compile OBJECT
+        tests/architecture/native_value_header_compile.cpp
+    )
+    target_link_libraries(ember_native_value_header_compile PRIVATE ember_core)
+    ember_configure_compile_options(ember_native_value_header_compile)
+
+    # Each consumer links only its own library; the main test executable can
+    # otherwise hide missing dependencies by linking sibling libraries.
+    foreach(stage IN ITEMS bytecode ir ssa jit)
+        set(ember_link_test_target "ember_architecture_${stage}_link")
+        add_executable(${ember_link_test_target}
+            tests/test_main.cpp
+            tests/architecture/${stage}_link_tests.cpp
+        )
+        target_link_libraries(${ember_link_test_target} PRIVATE ember_${stage})
+        target_include_directories(${ember_link_test_target} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        )
+        ember_configure_compile_options(${ember_link_test_target})
+        add_test(
+        NAME ${ember_link_test_target}
+        COMMAND ${ember_link_test_target}
+        )
+    endforeach()
 
     add_test(
         NAME ember_smoke
@@ -285,6 +408,13 @@ if(BUILD_TESTING)
     add_test(
         NAME ember_tests
         COMMAND ember_tests
+    )
+
+    add_test(
+        NAME ember_architecture_header_dependencies
+        COMMAND ${CMAKE_COMMAND}
+            "-DEMBER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            -P "${ember_architecture_test_script}"
     )
 
     add_test(
