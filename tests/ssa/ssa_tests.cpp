@@ -1,4 +1,4 @@
-#include "ember/semantic/typed_ast.hpp"
+#include "ember/core/function.hpp"
 #include "ember/ssa/dump.hpp"
 #include "ember/ssa/ssa.hpp"
 #include "ember/ssa/verifier.hpp"
@@ -11,9 +11,9 @@
 #include <vector>
 
 namespace {
-using ember::semantic::Type;
+using ember::core::CallTarget;
+using ember::core::Type;
 using ember::ssa::BlockParameter;
-using ember::ssa::CallTarget;
 using ember::ssa::CallTargetTable;
 using ember::ssa::Function;
 using ember::ssa::Instruction;
@@ -113,13 +113,13 @@ using ember::ssa::Terminator;
 [[nodiscard]] CallTargetTable validCallTargets() {
     return CallTargetTable{std::vector<CallTarget>{
         {.id = 100,
-         .kind = ember::semantic::FunctionKind::user,
+         .kind = ember::core::FunctionKind::user,
          .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64}},
         {.id = 101,
-         .kind = ember::semantic::FunctionKind::host,
+         .kind = ember::core::FunctionKind::host,
          .signature = {.parameterTypes = {Type::i64}, .returnType = Type::f64}},
         {.id = 102,
-         .kind = ember::semantic::FunctionKind::user,
+         .kind = ember::core::FunctionKind::user,
          .signature = {.parameterTypes = {Type::f64}, .returnType = Type::voidType}},
     }};
 }
@@ -129,15 +129,15 @@ using ember::ssa::Terminator;
         .id = 45,
         .signature = {.parameterTypes = {Type::i64}, .returnType = Type::f64},
         .valueTypes = {Type::i64, Type::boolean, Type::i64, Type::f64},
-        .blocks = {{.id = 0,
-                    .parameters = {},
-                    .instructions =
-                        {Instruction::parameter(0, 0),
-                         Instruction::constantBool(1, false),
-                         Instruction::callI64(2, 100, {0}),
-                         Instruction::callValue(3, 101, {0}, ember::semantic::FunctionKind::host),
-                         Instruction::callVoid(102, {3})},
-                    .terminator = Terminator::returnValue(3)}}};
+        .blocks = {
+            {.id = 0,
+             .parameters = {},
+             .instructions = {Instruction::parameter(0, 0),
+                              Instruction::constantBool(1, false),
+                              Instruction::callI64(2, 100, {0}),
+                              Instruction::callValue(3, 101, {0}, ember::core::FunctionKind::host),
+                              Instruction::callVoid(102, {3})},
+             .terminator = Terminator::returnValue(3)}}};
 }
 
 [[nodiscard]] Function valueCallResultFunction() {
@@ -145,11 +145,11 @@ using ember::ssa::Terminator;
         .id = 46,
         .signature = {.parameterTypes = {}, .returnType = Type::i64},
         .valueTypes = {Type::i64},
-        .blocks = {{.id = 0,
-                    .parameters = {},
-                    .instructions =
-                        {Instruction::callValue(0, 101, {}, ember::semantic::FunctionKind::host)},
-                    .terminator = Terminator::returnValue(0)}}};
+        .blocks = {
+            {.id = 0,
+             .parameters = {},
+             .instructions = {Instruction::callValue(0, 101, {}, ember::core::FunctionKind::host)},
+             .terminator = Terminator::returnValue(0)}}};
 }
 
 [[nodiscard]] Function voidCallFunction() {
@@ -283,7 +283,7 @@ EMBER_TEST("SSA verifier validates calls against a validated target table") {
                  "call target must be present in the target table");
 
     auto wrongKind = validCallFunction();
-    wrongKind.blocks[0].instructions[3].calleeKind = ember::semantic::FunctionKind::user;
+    wrongKind.blocks[0].instructions[3].calleeKind = ember::core::FunctionKind::user;
     tests.expect(rejected(std::move(wrongKind), validCallTargets()),
                  "call kind must match the target table");
 
@@ -300,7 +300,7 @@ EMBER_TEST("SSA verifier validates calls against a validated target table") {
     tests.expect(rejected(valueCallResultFunction(),
                           CallTargetTable{std::vector<CallTarget>{
                               {.id = 101,
-                               .kind = ember::semantic::FunctionKind::host,
+                               .kind = ember::core::FunctionKind::host,
                                .signature = {.parameterTypes = {}, .returnType = Type::f64}},
                           }}),
                  "call result type must match the target signature");
@@ -308,7 +308,7 @@ EMBER_TEST("SSA verifier validates calls against a validated target table") {
     tests.expect(rejected(valueCallResultFunction(),
                           CallTargetTable{std::vector<CallTarget>{
                               {.id = 101,
-                               .kind = ember::semantic::FunctionKind::host,
+                               .kind = ember::core::FunctionKind::host,
                                .signature = {.parameterTypes = {}, .returnType = Type::voidType}},
                           }}),
                  "value calls cannot target void functions");
@@ -316,7 +316,7 @@ EMBER_TEST("SSA verifier validates calls against a validated target table") {
     tests.expect(rejected(voidCallFunction(),
                           CallTargetTable{std::vector<CallTarget>{
                               {.id = 100,
-                               .kind = ember::semantic::FunctionKind::user,
+                               .kind = ember::core::FunctionKind::user,
                                .signature = {.parameterTypes = {}, .returnType = Type::i64}},
                           }}),
                  "void calls cannot target value functions");
@@ -326,18 +326,18 @@ EMBER_TEST("SSA verifier rejects malformed trusted call target tables") {
     tests.expect(rejected(validLoopFunction(),
                           CallTargetTable{std::vector<CallTarget>{
                               {.id = 100,
-                               .kind = ember::semantic::FunctionKind::user,
+                               .kind = ember::core::FunctionKind::user,
                                .signature = {.parameterTypes = {}, .returnType = Type::i64}},
                               {.id = 100,
-                               .kind = ember::semantic::FunctionKind::host,
+                               .kind = ember::core::FunctionKind::host,
                                .signature = {.parameterTypes = {}, .returnType = Type::f64}},
                           }}),
                  "duplicate target ids are rejected");
 
     tests.expect(rejected(validLoopFunction(),
                           CallTargetTable{std::vector<CallTarget>{
-                              {.id = ember::ssa::noFunction,
-                               .kind = ember::semantic::FunctionKind::user,
+                              {.id = ember::core::noFunction,
+                               .kind = ember::core::FunctionKind::user,
                                .signature = {.parameterTypes = {}, .returnType = Type::i64}},
                           }}),
                  "noFunction is not a valid target id");
@@ -346,7 +346,7 @@ EMBER_TEST("SSA verifier rejects malformed trusted call target tables") {
         rejected(validLoopFunction(),
                  CallTargetTable{std::vector<CallTarget>{
                      {.id = 100,
-                      .kind = ember::semantic::FunctionKind::user,
+                      .kind = ember::core::FunctionKind::user,
                       .signature = {.parameterTypes = {Type::voidType}, .returnType = Type::i64}},
                  }}),
         "target signatures cannot use void parameters");
@@ -356,7 +356,7 @@ EMBER_TEST("SSA verifier validates self call target metadata") {
     tests.expect(rejected(selfTargetFunction(),
                           CallTargetTable{std::vector<CallTarget>{
                               {.id = 49,
-                               .kind = ember::semantic::FunctionKind::user,
+                               .kind = ember::core::FunctionKind::user,
                                .signature = {.parameterTypes = {}, .returnType = Type::f64}},
                           }}),
                  "self call target signatures must match the SSA function signature");
@@ -364,7 +364,7 @@ EMBER_TEST("SSA verifier validates self call target metadata") {
     tests.expect(rejected(selfTargetFunction(),
                           CallTargetTable{std::vector<CallTarget>{
                               {.id = 49,
-                               .kind = ember::semantic::FunctionKind::host,
+                               .kind = ember::core::FunctionKind::host,
                                .signature = {.parameterTypes = {}, .returnType = Type::i64}},
                           }}),
                  "self call targets must describe a user function");
@@ -375,7 +375,7 @@ EMBER_TEST("SSA verifier accepts a recursive self call with matching metadata") 
         validRecursiveSelfCallFunction(),
         CallTargetTable{std::vector<CallTarget>{
             {.id = 50,
-             .kind = ember::semantic::FunctionKind::user,
+             .kind = ember::core::FunctionKind::user,
              .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64}},
         }});
     tests.expect(verified.function.has_value(),
@@ -384,7 +384,7 @@ EMBER_TEST("SSA verifier accepts a recursive self call with matching metadata") 
 
 EMBER_TEST("SSA verifier rejects each structural invariant group") {
     auto invalidFunctionId = validLoopFunction();
-    invalidFunctionId.id = ember::ssa::noFunction;
+    invalidFunctionId.id = ember::core::noFunction;
     tests.expect(rejected(std::move(invalidFunctionId)),
                  "noFunction is not a valid SSA function id");
 

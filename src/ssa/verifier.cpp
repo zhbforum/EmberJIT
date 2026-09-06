@@ -21,13 +21,13 @@ struct DefinitionLocation {
             .primarySpan = {}};
 }
 
-[[nodiscard]] bool validType(semantic::Type type) noexcept {
-    return type == semantic::Type::i64 || type == semantic::Type::f64 ||
-           type == semantic::Type::boolean || type == semantic::Type::voidType;
+[[nodiscard]] bool validType(core::Type type) noexcept {
+    return type == core::Type::i64 || type == core::Type::f64 || type == core::Type::boolean ||
+           type == core::Type::voidType;
 }
 
-[[nodiscard]] bool validValueType(semantic::Type type) noexcept {
-    return validType(type) && type != semantic::Type::voidType;
+[[nodiscard]] bool validValueType(core::Type type) noexcept {
+    return validType(type) && type != core::Type::voidType;
 }
 
 [[nodiscard]] bool isI64Comparison(Opcode opcode) noexcept {
@@ -57,10 +57,11 @@ struct DefinitionLocation {
 }
 } // namespace
 
-const CallTarget* CallTargetTable::find(semantic::FunctionId id) const noexcept {
-    const auto found = std::find_if(targets_.begin(),
-                                    targets_.end(),
-                                    [id](const CallTarget& target) { return target.id == id; });
+const core::CallTarget* CallTargetTable::find(core::FunctionId id) const noexcept {
+    const auto found =
+        std::find_if(targets_.begin(), targets_.end(), [id](const core::CallTarget& target) {
+            return target.id == id;
+        });
     return found == targets_.end() ? nullptr : &*found;
 }
 
@@ -69,23 +70,22 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
     const auto report = [&diagnostics, id = function.id](std::string message) {
         diagnostics.push_back(error("function #" + std::to_string(id) + ": " + std::move(message)));
     };
-    const auto validSignature = [](const semantic::FunctionSignature& signature) {
+    const auto validSignature = [](const core::FunctionSignature& signature) {
         return validType(signature.returnType) &&
                std::ranges::all_of(signature.parameterTypes,
-                                   [](semantic::Type type) { return validValueType(type); });
+                                   [](core::Type type) { return validValueType(type); });
     };
 
     for (std::size_t index{}; index < callTargets.targets_.size(); ++index) {
         const auto& target = callTargets.targets_[index];
-        if (target.id == noFunction)
+        if (target.id == core::noFunction)
             report("trusted call target table contains noFunction");
-        if (target.kind != semantic::FunctionKind::user &&
-            target.kind != semantic::FunctionKind::host)
+        if (target.kind != core::FunctionKind::user && target.kind != core::FunctionKind::host)
             report("trusted call target table contains an invalid function kind");
         if (!validSignature(target.signature))
             report("trusted call target table contains an invalid signature");
         if (target.id == function.id &&
-            (target.kind != semantic::FunctionKind::user ||
+            (target.kind != core::FunctionKind::user ||
              target.signature.returnType != function.signature.returnType ||
              target.signature.parameterTypes != function.signature.parameterTypes))
             report("self call target metadata does not match the user function signature");
@@ -98,7 +98,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
     const auto maximumValueCount = static_cast<std::size_t>(std::numeric_limits<ValueId>::max());
     const auto maximumParameterCount =
         static_cast<std::size_t>(std::numeric_limits<ParameterIndex>::max());
-    if (function.id == noFunction)
+    if (function.id == core::noFunction)
         report("has an invalid function id");
     if (!validSignature(function.signature) || function.blocks.empty())
         report("has an invalid signature or no entry block");
@@ -107,7 +107,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
         function.signature.parameterTypes.size() > maximumParameterCount)
         report("exceeds the representable block, value, or parameter range");
     if (!std::ranges::all_of(function.valueTypes,
-                             [](semantic::Type type) { return validValueType(type); }))
+                             [](core::Type type) { return validValueType(type); }))
         report("has an invalid SSA value type");
     if (!diagnostics.empty())
         return {.function = std::nullopt, .diagnostics = std::move(diagnostics)};
@@ -127,9 +127,8 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
         return value != noValue && static_cast<std::size_t>(value) < function.valueTypes.size();
     };
     const auto hasNoCallMetadata = [](const Instruction& instruction) {
-        return instruction.callee == noFunction &&
-               instruction.calleeKind == semantic::FunctionKind::user &&
-               instruction.arguments.empty();
+        return instruction.callee == core::noFunction &&
+               instruction.calleeKind == core::FunctionKind::user && instruction.arguments.empty();
     };
     const auto hasNoValueOperands = [](const Instruction& instruction) {
         return instruction.input == noValue && instruction.left == noValue &&
@@ -141,7 +140,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
 
     std::vector<std::optional<DefinitionLocation>> definitions(function.valueTypes.size());
     const auto define = [&](ValueId value,
-                            semantic::Type type,
+                            core::Type type,
                             BlockId block,
                             std::size_t position,
                             std::string_view role) {
@@ -181,7 +180,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                 define(instruction.result,
                        parameterCount < function.signature.parameterTypes.size()
                            ? function.signature.parameterTypes[parameterCount]
-                           : semantic::Type::i64,
+                           : core::Type::i64,
                        block.id,
                        position,
                        "function parameter");
@@ -191,14 +190,14 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                 if (instruction.parameterIndex != noParameter || !hasNoValueOperands(instruction) ||
                     !hasNoCallMetadata(instruction))
                     report("i64 constant has non-canonical unused operands");
-                define(instruction.result, semantic::Type::i64, block.id, position, "constant");
+                define(instruction.result, core::Type::i64, block.id, position, "constant");
                 parameterPrefix = false;
                 break;
             case Opcode::constantF64:
                 if (instruction.parameterIndex != noParameter || !hasNoValueOperands(instruction) ||
                     !hasNoCallMetadata(instruction))
                     report("f64 constant has non-canonical unused operands");
-                define(instruction.result, semantic::Type::f64, block.id, position, "constant");
+                define(instruction.result, core::Type::f64, block.id, position, "constant");
                 parameterPrefix = false;
                 break;
             case Opcode::constantBool:
@@ -206,7 +205,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                     !hasNoCallMetadata(instruction) ||
                     (instruction.constant != 0 && instruction.constant != 1))
                     report("boolean constant has a non-canonical encoding");
-                define(instruction.result, semantic::Type::boolean, block.id, position, "constant");
+                define(instruction.result, core::Type::boolean, block.id, position, "constant");
                 parameterPrefix = false;
                 break;
             case Opcode::negateI64:
@@ -214,7 +213,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                     instruction.right != noValue || instruction.constant != 0 ||
                     !hasNoCallMetadata(instruction))
                     report("i64 negation has non-canonical unused operands");
-                define(instruction.result, semantic::Type::i64, block.id, position, "negation");
+                define(instruction.result, core::Type::i64, block.id, position, "negation");
                 parameterPrefix = false;
                 break;
             case Opcode::negateF64:
@@ -222,7 +221,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                     instruction.right != noValue || instruction.constant != 0 ||
                     !hasNoCallMetadata(instruction))
                     report("f64 negation has non-canonical unused operands");
-                define(instruction.result, semantic::Type::f64, block.id, position, "negation");
+                define(instruction.result, core::Type::f64, block.id, position, "negation");
                 parameterPrefix = false;
                 break;
             case Opcode::addI64:
@@ -240,8 +239,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                     instruction.constant != 0 || !hasNoCallMetadata(instruction))
                     report("i64 binary instruction has non-canonical unused operands");
                 define(instruction.result,
-                       isI64Comparison(instruction.opcode) ? semantic::Type::boolean
-                                                           : semantic::Type::i64,
+                       isI64Comparison(instruction.opcode) ? core::Type::boolean : core::Type::i64,
                        block.id,
                        position,
                        "binary instruction");
@@ -264,8 +262,8 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                     report("binary instruction has non-canonical unused operands");
                 define(instruction.result,
                        isF64Comparison(instruction.opcode) || isBoolBinary(instruction.opcode)
-                           ? semantic::Type::boolean
-                           : semantic::Type::f64,
+                           ? core::Type::boolean
+                           : core::Type::f64,
                        block.id,
                        position,
                        "binary instruction");
@@ -273,18 +271,18 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                 break;
             case Opcode::callI64:
                 if (instruction.parameterIndex != noParameter || !hasNoValueOperands(instruction) ||
-                    instruction.constant != 0 || instruction.callee == noFunction ||
-                    (instruction.calleeKind != semantic::FunctionKind::user &&
-                     instruction.calleeKind != semantic::FunctionKind::host))
+                    instruction.constant != 0 || instruction.callee == core::noFunction ||
+                    (instruction.calleeKind != core::FunctionKind::user &&
+                     instruction.calleeKind != core::FunctionKind::host))
                     report("i64 call has a non-canonical encoding");
-                define(instruction.result, semantic::Type::i64, block.id, position, "call");
+                define(instruction.result, core::Type::i64, block.id, position, "call");
                 parameterPrefix = false;
                 break;
             case Opcode::callValue:
                 if (instruction.parameterIndex != noParameter || !hasNoValueOperands(instruction) ||
-                    instruction.constant != 0 || instruction.callee == noFunction ||
-                    (instruction.calleeKind != semantic::FunctionKind::user &&
-                     instruction.calleeKind != semantic::FunctionKind::host))
+                    instruction.constant != 0 || instruction.callee == core::noFunction ||
+                    (instruction.calleeKind != core::FunctionKind::user &&
+                     instruction.calleeKind != core::FunctionKind::host))
                     report("value call has a non-canonical encoding");
                 if (!validValue(instruction.result))
                     report("value call must define a valid non-void SSA value");
@@ -299,9 +297,9 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
             case Opcode::callVoid:
                 if (instruction.parameterIndex != noParameter || instruction.result != noValue ||
                     !hasNoValueOperands(instruction) || instruction.constant != 0 ||
-                    instruction.callee == noFunction ||
-                    (instruction.calleeKind != semantic::FunctionKind::user &&
-                     instruction.calleeKind != semantic::FunctionKind::host))
+                    instruction.callee == core::noFunction ||
+                    (instruction.calleeKind != core::FunctionKind::user &&
+                     instruction.calleeKind != core::FunctionKind::host))
                     report("void call has a non-canonical encoding");
                 parameterPrefix = false;
                 break;
@@ -326,13 +324,13 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                 report("conditional branch has non-canonical operands or invalid targets");
             break;
         case TerminatorKind::returnValue:
-            if (function.signature.returnType == semantic::Type::voidType ||
+            if (function.signature.returnType == core::Type::voidType ||
                 terminator.condition != noValue || terminator.value == noValue ||
                 !hasNoEdge(terminator.trueEdge) || !hasNoEdge(terminator.falseEdge))
                 report("return value is incompatible with the signature or non-canonical operands");
             break;
         case TerminatorKind::returnVoid:
-            if (function.signature.returnType != semantic::Type::voidType ||
+            if (function.signature.returnType != core::Type::voidType ||
                 terminator.condition != noValue || terminator.value != noValue ||
                 !hasNoEdge(terminator.trueEdge) || !hasNoEdge(terminator.falseEdge))
                 report("return_void is incompatible with the signature or non-canonical operands");
@@ -416,7 +414,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
     }
 
     const auto validateUse = [&](ValueId value,
-                                 semantic::Type type,
+                                 core::Type type,
                                  BlockId block,
                                  std::size_t position,
                                  std::string_view role) {
@@ -456,22 +454,21 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
                             "call argument");
 
             if (instruction.opcode == Opcode::callVoid) {
-                if (target->signature.returnType != semantic::Type::voidType)
+                if (target->signature.returnType != core::Type::voidType)
                     report("void call targets a non-void function");
                 return;
             }
 
-            if (target->signature.returnType == semantic::Type::voidType)
+            if (target->signature.returnType == core::Type::voidType)
                 report("value call targets a void function");
             if (!validValue(instruction.result) ||
                 function.valueTypes[instruction.result] != target->signature.returnType)
                 report("call result type does not match the trusted target signature");
             if (instruction.opcode == Opcode::callI64) {
-                if (target->signature.returnType != semantic::Type::i64)
+                if (target->signature.returnType != core::Type::i64)
                     report("call_i64 targets a non-i64 function");
-                if (!std::ranges::all_of(target->signature.parameterTypes, [](semantic::Type type) {
-                        return type == semantic::Type::i64;
-                    }))
+                if (!std::ranges::all_of(target->signature.parameterTypes,
+                                         [](core::Type type) { return type == core::Type::i64; }))
                     report("call_i64 target has a non-i64 parameter");
             }
         };
@@ -481,39 +478,39 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
             const auto& instruction = block.instructions[index];
             const auto position = index + 1;
             if (instruction.opcode == Opcode::negateI64)
-                validateUse(instruction.input, semantic::Type::i64, block.id, position, "negation");
+                validateUse(instruction.input, core::Type::i64, block.id, position, "negation");
             else if (instruction.opcode == Opcode::negateF64)
-                validateUse(instruction.input, semantic::Type::f64, block.id, position, "negation");
+                validateUse(instruction.input, core::Type::f64, block.id, position, "negation");
             else if (isI64Binary(instruction.opcode)) {
                 validateUse(instruction.left,
-                            semantic::Type::i64,
+                            core::Type::i64,
                             block.id,
                             position,
                             "binary instruction");
                 validateUse(instruction.right,
-                            semantic::Type::i64,
+                            core::Type::i64,
                             block.id,
                             position,
                             "binary instruction");
             } else if (isF64Binary(instruction.opcode)) {
                 validateUse(instruction.left,
-                            semantic::Type::f64,
+                            core::Type::f64,
                             block.id,
                             position,
                             "binary instruction");
                 validateUse(instruction.right,
-                            semantic::Type::f64,
+                            core::Type::f64,
                             block.id,
                             position,
                             "binary instruction");
             } else if (isBoolBinary(instruction.opcode)) {
                 validateUse(instruction.left,
-                            semantic::Type::boolean,
+                            core::Type::boolean,
                             block.id,
                             position,
                             "binary instruction");
                 validateUse(instruction.right,
-                            semantic::Type::boolean,
+                            core::Type::boolean,
                             block.id,
                             position,
                             "binary instruction");
@@ -542,7 +539,7 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
             break;
         case TerminatorKind::branchIfFalse:
             validateUse(block.terminator.condition,
-                        semantic::Type::boolean,
+                        core::Type::boolean,
                         block.id,
                         terminatorPosition,
                         "conditional branch");
@@ -569,6 +566,6 @@ VerifyResult Verifier::verify(Function function, CallTargetTable callTargets) co
 }
 
 VerifyResult Verifier::verify(Function function) const {
-    return verify(std::move(function), CallTargetTable{std::vector<CallTarget>{}});
+    return verify(std::move(function), CallTargetTable{std::vector<core::CallTarget>{}});
 }
 } // namespace ember::ssa

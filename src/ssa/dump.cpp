@@ -107,9 +107,9 @@ std::string dump(const VerifiedSsaFunction& verified) {
     for (std::size_t index{}; index < function.signature.parameterTypes.size(); ++index) {
         if (index != 0)
             output << ", ";
-        output << semantic::typeName(function.signature.parameterTypes[index]);
+        output << core::typeName(function.signature.parameterTypes[index]);
     }
-    output << ") -> " << semantic::typeName(function.signature.returnType) << '\n';
+    output << ") -> " << core::typeName(function.signature.returnType) << '\n';
 
     for (const auto& block : function.blocks) {
         output << "block b" << block.id;
@@ -119,7 +119,7 @@ std::string dump(const VerifiedSsaFunction& verified) {
                 if (index != 0)
                     output << ", ";
                 const auto& parameter = block.parameters[index];
-                output << "v" << parameter.value << ':' << semantic::typeName(parameter.type);
+                output << "v" << parameter.value << ':' << core::typeName(parameter.type);
             }
             output << ')';
         }
@@ -129,7 +129,7 @@ std::string dump(const VerifiedSsaFunction& verified) {
             output << "  ";
             if (instruction.result != noValue)
                 output << "v" << instruction.result << ':'
-                       << semantic::typeName(function.valueTypes[instruction.result]) << " = ";
+                       << core::typeName(function.valueTypes[instruction.result]) << " = ";
             output << opcodeName(instruction.opcode);
             switch (instruction.opcode) {
             case Opcode::parameter:
