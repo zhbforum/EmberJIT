@@ -1,4 +1,5 @@
 #include "ember/bytecode/bytecode.hpp"
+#include "ember/bytecode/lowering.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
 #include "ember/ir/bytecode_lowerer.hpp"
@@ -233,11 +234,11 @@ EMBER_TEST("baseline optimization pipeline reduces code size for a constant CFG"
 }
 
 EMBER_TEST("baseline compiler rejects verifier-valid noncanonical preheaders") {
+    using ember::core::Type;
     using ember::ir::BasicBlock;
     using ember::ir::Function;
     using ember::ir::Instruction;
     using ember::ir::Terminator;
-    using ember::semantic::Type;
 
     auto verified = ember::ir::Verifier{}.verify(
         Function{.id = 71,

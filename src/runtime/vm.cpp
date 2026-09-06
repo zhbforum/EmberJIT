@@ -19,7 +19,7 @@ struct Frame {
     // Values below this boundary belong to suspended caller expressions.
     std::size_t stackBase{};
     bool ownsDynamicFrame{};
-    std::vector<bytecode::Value> locals;
+    std::vector<core::Value> locals;
 };
 
 [[nodiscard]] ExecutionResult fail(std::string code, std::string message) {
@@ -38,12 +38,12 @@ VirtualMachine VirtualMachine::create(bytecode::VerifiedProgram verifiedProgram,
     return VirtualMachine{std::move(verifiedProgram), std::move(options)};
 }
 
-const RuntimeFunction* VirtualMachine::function(semantic::FunctionId id) const noexcept {
+const RuntimeFunction* VirtualMachine::function(core::FunctionId id) const noexcept {
     return functions_.find(id);
 }
 
-ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
-                                        const std::vector<bytecode::Value>& arguments) {
+ExecutionReport VirtualMachine::execute(core::FunctionId entry,
+                                        const std::vector<core::Value>& arguments) {
     std::vector<HotFunctionEvent> hotEvents;
     NativeCallState state{.machine = this,
                           .events = &hotEvents,
@@ -55,8 +55,8 @@ ExecutionReport VirtualMachine::execute(semantic::FunctionId entry,
     return {.result = std::move(result), .hotEvents = std::move(hotEvents)};
 }
 
-ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
-                                                const std::vector<bytecode::Value>& arguments,
+ExecutionResult VirtualMachine::executeInternal(core::FunctionId entry,
+                                                const std::vector<core::Value>& arguments,
                                                 NativeCallState& state,
                                                 bool forceVm) {
     if (state.dynamicFrameCount >= maximumFrameCount)
@@ -74,21 +74,20 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
         return fail(std::move(code), std::move(message));
     };
     const auto createVmFrame = [](const RuntimeFunction* function,
-                                  const std::vector<bytecode::Value>& callArguments,
+                                  const std::vector<core::Value>& callArguments,
                                   std::size_t stackBase) -> Frame {
         Frame frame{.function = function,
                     .pc = 0,
                     .stackBase = stackBase,
                     .ownsDynamicFrame = false,
-                    .locals = std::vector<bytecode::Value>(function->bytecode().localCount)};
+                    .locals = std::vector<core::Value>(function->bytecode().localCount)};
         for (std::size_t index = 0; index < callArguments.size(); ++index)
             frame.locals[index] = callArguments[index];
         return frame;
     };
     const auto invokeNative =
-        [&state](
-            const RuntimeFunction* function,
-            std::span<const bytecode::Value> callArguments) -> std::optional<NativeInvocation> {
+        [&state](const RuntimeFunction* function,
+                 std::span<const core::Value> callArguments) -> std::optional<NativeInvocation> {
         const auto& bytecode = function->bytecode();
         std::vector<std::uint64_t> locals(bytecode.localCount);
         for (std::size_t index = 0; index < callArguments.size(); ++index) {
@@ -117,7 +116,7 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
         if (result->error != NativeFrameError::none)
             return failExecution("R5005", "invalid native execution status");
         const auto returnType = initialDispatch->function->bytecode().signature.returnType;
-        if (returnType == semantic::Type::voidType)
+        if (returnType == core::Type::voidType)
             return {};
         const auto value = decodeNativeValueWord(result->value, returnType);
         if (!value)
@@ -127,8 +126,8 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
 
     std::vector<Frame> frames;
     frames.push_back(createVmFrame(initialDispatch->function, arguments, 0));
-    std::vector<bytecode::Value> stack;
-    const auto popValue = [&stack]() -> bytecode::Value {
+    std::vector<core::Value> stack;
+    const auto popValue = [&stack]() -> core::Value {
         auto value = std::move(stack.back());
         stack.pop_back();
         return value;
@@ -257,15 +256,14 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
             if (callee == nullptr)
                 return failExecution("R5003", "unsupported function");
             const auto& calleeBytecode = callee->bytecode();
-            std::vector<bytecode::Value> callArguments(
-                calleeBytecode.signature.parameterTypes.size());
+            std::vector<core::Value> callArguments(calleeBytecode.signature.parameterTypes.size());
             for (std::size_t index = callArguments.size(); index > 0; --index)
                 callArguments[index - 1] = popValue();
 
             // Advance the caller before pushing the callee so execution resumes
             // at the instruction following the call after the callee returns.
             ++frame.pc;
-            if (calleeBytecode.kind == semantic::FunctionKind::user) {
+            if (calleeBytecode.kind == core::FunctionKind::user) {
                 if (state.dynamicFrameCount >= maximumFrameCount)
                     return failExecution("R5006", "VM frame limit exceeded");
                 const auto calleeDispatch = dispatcher.dispatch(callee->id(), callArguments);
@@ -291,7 +289,7 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
                         return failExecution("R5005", "invalid native execution status");
                     const auto returnType =
                         calleeDispatch->function->bytecode().signature.returnType;
-                    if (returnType != semantic::Type::voidType) {
+                    if (returnType != core::Type::voidType) {
                         const auto value = decodeNativeValueWord(result->value, returnType);
                         if (!value)
                             return failExecution("R5005", "invalid native result word");
@@ -312,7 +310,7 @@ ExecutionResult VirtualMachine::executeInternal(semantic::FunctionId entry,
             const auto invocation = bytecode::invokeBuiltin(*builtin, callArguments);
             if (!invocation.succeeded)
                 return failExecution("R5003", "invalid host invocation");
-            if (builtin->signature.returnType != semantic::Type::voidType) {
+            if (builtin->signature.returnType != core::Type::voidType) {
                 if (!invocation.value)
                     return failExecution("R5003", "host function returned no value");
                 stack.push_back(*invocation.value);
@@ -359,7 +357,7 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame* caller,
         return static_cast<std::uint64_t>(error);
     };
     if (caller == nullptr || caller->callContext == nullptr ||
-        callee > std::numeric_limits<semantic::FunctionId>::max() ||
+        callee > std::numeric_limits<core::FunctionId>::max() ||
         argumentCount > std::numeric_limits<std::size_t>::max() ||
         (argumentCount != 0 && arguments == nullptr))
         return failBridge(NativeFrameError::invalidCall);
@@ -371,16 +369,15 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame* caller,
         return failBridge(NativeFrameError::invalidCall);
     bool depthIncremented{};
     try {
-        std::vector<bytecode::Value> callArguments;
+        std::vector<core::Value> callArguments;
         callArguments.reserve(static_cast<std::size_t>(argumentCount));
-        const auto* target =
-            state->machine->functions_.find(static_cast<semantic::FunctionId>(callee));
+        const auto* target = state->machine->functions_.find(static_cast<core::FunctionId>(callee));
         if (target == nullptr ||
             target->bytecode().signature.parameterTypes.size() != argumentCount)
             return failBridge(NativeFrameError::invalidCall);
         const auto returnType = target->bytecode().signature.returnType;
-        if ((returnType == semantic::Type::voidType && result != nullptr) ||
-            (returnType != semantic::Type::voidType && result == nullptr))
+        if ((returnType == core::Type::voidType && result != nullptr) ||
+            (returnType != core::Type::voidType && result == nullptr))
             return failBridge(NativeFrameError::invalidCall);
         for (std::size_t index{}; index < static_cast<std::size_t>(argumentCount); ++index) {
             const auto value =
@@ -391,14 +388,14 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame* caller,
             callArguments.push_back(*value);
         }
 
-        if (target->bytecode().kind == semantic::FunctionKind::host) {
+        if (target->bytecode().kind == core::FunctionKind::host) {
             const auto* builtin = bytecode::findBuiltin(target->id());
             if (builtin == nullptr)
                 return failBridge(NativeFrameError::invalidCall);
             const auto invocation = bytecode::invokeBuiltin(*builtin, callArguments);
             if (!invocation.succeeded)
                 return failBridge(NativeFrameError::invalidCall);
-            if (returnType != semantic::Type::voidType) {
+            if (returnType != core::Type::voidType) {
                 if (!invocation.value)
                     return failBridge(NativeFrameError::invalidCall);
                 const auto value = encodeNativeValueWord(*invocation.value, returnType);
@@ -415,7 +412,7 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame* caller,
             depthIncremented = true;
         }
         const auto invocation =
-            state->machine->executeInternal(static_cast<semantic::FunctionId>(callee),
+            state->machine->executeInternal(static_cast<core::FunctionId>(callee),
                                             callArguments,
                                             *state,
                                             forceVm);
@@ -430,7 +427,7 @@ std::uint64_t VirtualMachine::nativeCallBridge(jit::NativeFrame* caller,
                                                     : NativeFrameError::invalidCall;
             return failBridge(error);
         }
-        if (returnType == semantic::Type::voidType)
+        if (returnType == core::Type::voidType)
             return static_cast<std::uint64_t>(NativeFrameError::none);
         if (!invocation.value)
             return failBridge(NativeFrameError::invalidCall);

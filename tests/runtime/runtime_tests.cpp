@@ -20,9 +20,9 @@ using ember::bytecode::Function;
 using ember::bytecode::Instruction;
 using ember::bytecode::Opcode;
 using ember::bytecode::Program;
-using ember::semantic::FunctionId;
-using ember::semantic::FunctionKind;
-using ember::semantic::Type;
+using ember::core::FunctionId;
+using ember::core::FunctionKind;
+using ember::core::Type;
 using ember::test::TestContext;
 
 [[nodiscard]] Function voidFunction(FunctionId id, std::vector<Instruction> code) {
@@ -40,12 +40,11 @@ using ember::test::TestContext;
 }
 
 EMBER_TEST("native value decoder rejects non-canonical boolean words") {
-    tests.expect(!ember::runtime::decodeNativeValueWord(2U, Type::boolean).has_value() &&
-                     ember::runtime::decodeNativeValueWord(0U, Type::boolean) ==
-                         ember::bytecode::Value{false} &&
-                     ember::runtime::decodeNativeValueWord(1U, Type::boolean) ==
-                         ember::bytecode::Value{true},
-                 "runtime native boundary accepts boolean words only in canonical 0/1 form");
+    tests.expect(
+        !ember::runtime::decodeNativeValueWord(2U, Type::boolean).has_value() &&
+            ember::runtime::decodeNativeValueWord(0U, Type::boolean) == ember::core::Value{false} &&
+            ember::runtime::decodeNativeValueWord(1U, Type::boolean) == ember::core::Value{true},
+        "runtime native boundary accepts boolean words only in canonical 0/1 form");
 }
 
 EMBER_TEST("dispatch events are execution-local and emitted once across repeated execution") {
@@ -90,7 +89,7 @@ EMBER_TEST("a recursive call can become hot without changing the active VM chain
              voidFunction(0,
                           {{.opcode = Opcode::constant,
                             .operand = 0,
-                            .value = ember::bytecode::Value{std::int64_t{3}}},
+                            .value = ember::core::Value{std::int64_t{3}}},
                            {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
                            {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}),
              {.id = 1,
@@ -101,13 +100,13 @@ EMBER_TEST("a recursive call can become hot without changing the active VM chain
               .code = {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                        {.opcode = Opcode::constant,
                         .operand = 0,
-                        .value = ember::bytecode::Value{std::int64_t{0}}},
+                        .value = ember::core::Value{std::int64_t{0}}},
                        {.opcode = Opcode::greaterI64, .operand = 0, .value = std::nullopt},
                        {.opcode = Opcode::jumpIfFalse, .operand = 8, .value = std::nullopt},
                        {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                        {.opcode = Opcode::constant,
                         .operand = 0,
-                        .value = ember::bytecode::Value{std::int64_t{1}}},
+                        .value = ember::core::Value{std::int64_t{1}}},
                        {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
                        {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
                        {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}},
@@ -192,13 +191,12 @@ EMBER_TEST("native v0.1 values preserve f64 edge semantics, bool results, and vo
                           {.opcode = Opcode::load, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::lessF64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
-                voidFunction(6,
-                             {{.opcode = Opcode::constant,
-                               .operand = 0,
-                               .value = ember::bytecode::Value{1.0}},
-                              {.opcode = Opcode::negateF64, .operand = 0, .value = std::nullopt},
-                              {.opcode = Opcode::pop, .operand = 0, .value = std::nullopt},
-                              {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}),
+                voidFunction(
+                    6,
+                    {{.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{1.0}},
+                     {.opcode = Opcode::negateF64, .operand = 0, .value = std::nullopt},
+                     {.opcode = Opcode::pop, .operand = 0, .value = std::nullopt},
+                     {.opcode = Opcode::returnVoid, .operand = 0, .value = std::nullopt}}),
                 {.id = 7,
                  .kind = FunctionKind::user,
                  .signature = {.parameterTypes = {Type::f64, Type::f64}, .returnType = Type::f64},
@@ -258,23 +256,23 @@ EMBER_TEST("native v0.1 values preserve f64 edge semantics, bool results, and vo
                          std::bit_cast<std::uint64_t>(std::get<double>(*vmZero.result.value)),
                  "native f64 return preserves the signed-zero bit pattern");
     tests.expect(!jitNanEqual.result.error && !vmNanEqual.result.error &&
-                     jitNanEqual.result.value == ember::bytecode::Value{false} &&
+                     jitNanEqual.result.value == ember::core::Value{false} &&
                      jitNanEqual.result.value == vmNanEqual.result.value &&
-                     jitSignedZeroEqual.result.value == ember::bytecode::Value{true} &&
+                     jitSignedZeroEqual.result.value == ember::core::Value{true} &&
                      jitSignedZeroEqual.result.value == vmSignedZeroEqual.result.value,
                  "native equality preserves NaN and signed-zero semantics");
     tests.expect(
         !jitNanLess.result.error && !vmNanLess.result.error &&
-            jitNanLess.result.value == ember::bytecode::Value{false} &&
+            jitNanLess.result.value == ember::core::Value{false} &&
             jitNanLess.result.value == vmNanLess.result.value &&
-            jitOrderedLess.result.value == ember::bytecode::Value{true} &&
+            jitOrderedLess.result.value == ember::core::Value{true} &&
             jitOrderedLess.result.value == vmOrderedLess.result.value,
         "native relational comparisons reject unordered operands and preserve ordered results");
     tests.expect(!jitVoid.result.error && !vmVoid.result.error && !jitVoid.result.value &&
                      !vmVoid.result.value,
                  "native void return does not materialize a runtime value");
     tests.expect(!jitArithmetic.result.error && !vmArithmetic.result.error &&
-                     jitArithmetic.result.value == ember::bytecode::Value{21.0} &&
+                     jitArithmetic.result.value == ember::core::Value{21.0} &&
                      jitArithmetic.result.value == vmArithmetic.result.value,
                  "native SSE2 add, sub, mul, and div match the VM result");
 #if EMBER_HAS_WIN64_JIT
@@ -370,7 +368,7 @@ EMBER_TEST("native floating and boolean operations match the VM across edge-case
         for (const auto& [left, right] : cases) {
             const auto jitReport = jitVm.execute(0, {left, right});
             const auto vmReport = vm.execute(0, {left, right});
-            const auto expected = ember::bytecode::Value{floatExpected(operation, left, right)};
+            const auto expected = ember::core::Value{floatExpected(operation, left, right)};
             operationMatches = operationMatches && !jitReport.result.error &&
                                !vmReport.result.error && jitReport.result.value == expected &&
                                vmReport.result.value == expected;
@@ -421,7 +419,7 @@ EMBER_TEST("native floating and boolean operations match the VM across edge-case
         for (const auto& [left, right] : boolCases) {
             const auto jitReport = jitVm.execute(0, {left, right});
             const auto vmReport = vm.execute(0, {left, right});
-            const auto expected = ember::bytecode::Value{boolExpected(operation, left, right)};
+            const auto expected = ember::core::Value{boolExpected(operation, left, right)};
             operationMatches = operationMatches && !jitReport.result.error &&
                                !vmReport.result.error && jitReport.result.value == expected &&
                                vmReport.result.value == expected;
@@ -486,14 +484,13 @@ EMBER_TEST("native user call_void passes no result word through the runtime brid
                  .signature = {.parameterTypes = {}, .returnType = Type::i64},
                  .localCount = 0,
                  .localTypes = {},
-                 .code = {{.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{1.25}},
-                          {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
-                          {.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{42}}},
-                          {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
+                 .code =
+                     {{.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{1.25}},
+                      {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
+                      {.opcode = Opcode::constant,
+                       .operand = 0,
+                       .value = ember::core::Value{std::int64_t{42}}},
+                      {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
                 {.id = 1,
                  .kind = FunctionKind::user,
                  .signature = {.parameterTypes = {Type::f64}, .returnType = Type::voidType},
@@ -520,7 +517,7 @@ EMBER_TEST("native user call_void passes no result word through the runtime brid
     const auto jitReport = jitVm.execute(0);
     const auto vmReport = vm.execute(0);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{42}} &&
+                     jitReport.result.value == ember::core::Value{std::int64_t{42}} &&
                      jitReport.result.value == vmReport.result.value,
                  "native caller resumes after a void callee without consuming a fabricated value");
 #if EMBER_HAS_WIN64_JIT
@@ -612,7 +609,7 @@ EMBER_TEST("profiling baseline and hot tracking preserve execution results") {
                  .localTypes = {},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{42}}},
+                           .value = ember::core::Value{std::int64_t{42}}},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}}}};
     };
     auto unprofiled = verify(makeProgram());
@@ -659,10 +656,10 @@ EMBER_TEST("hot binary i64 callee publishes atomically and matches the VM") {
                  .localTypes = {},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{19}}},
+                           .value = ember::core::Value{std::int64_t{19}}},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{23}}},
+                           .value = ember::core::Value{std::int64_t{23}}},
                           {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
                 {.id = 1,
@@ -697,7 +694,7 @@ EMBER_TEST("hot binary i64 callee publishes atomically and matches the VM") {
 
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{42}},
+                     jitReport.result.value == ember::core::Value{std::int64_t{42}},
                  "native threshold call has the same result as VM execution");
     tests.expect(callee != nullptr && callee->profiling().isHot,
                  "binary callee becomes hot before native-target selection");
@@ -728,7 +725,7 @@ EMBER_TEST("hot i64 loop with locals and comparisons matches the VM") {
                  .localTypes = {},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{97}}},
+                           .value = ember::core::Value{std::int64_t{97}}},
                           {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
                 {.id = 1,
@@ -738,7 +735,7 @@ EMBER_TEST("hot i64 loop with locals and comparisons matches the VM") {
                  .localTypes = {Type::i64, Type::i64},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{0}}},
+                           .value = ember::core::Value{std::int64_t{0}}},
                           {.opcode = Opcode::store, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::load, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
@@ -747,7 +744,7 @@ EMBER_TEST("hot i64 loop with locals and comparisons matches the VM") {
                           {.opcode = Opcode::load, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{1}}},
+                           .value = ember::core::Value{std::int64_t{1}}},
                           {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::store, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::jump, .operand = 2, .value = std::nullopt},
@@ -772,7 +769,7 @@ EMBER_TEST("hot i64 loop with locals and comparisons matches the VM") {
     const auto vmReport = vm.execute(0);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{97}},
+                     jitReport.result.value == ember::core::Value{std::int64_t{97}},
                  "native locals, comparisons and loop branches preserve VM semantics");
 #if EMBER_HAS_WIN64_JIT
     const auto* loop = jitVm.function(1);
@@ -793,7 +790,7 @@ EMBER_TEST("native recursive calls preserve the VM result") {
                  .code = {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{1}}},
+                           .value = ember::core::Value{std::int64_t{1}}},
                           {.opcode = Opcode::lessEqualI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::jumpIfFalse, .operand = 6, .value = std::nullopt},
                           {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
@@ -801,13 +798,13 @@ EMBER_TEST("native recursive calls preserve the VM result") {
                           {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{1}}},
+                           .value = ember::core::Value{std::int64_t{1}}},
                           {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{2}}},
+                           .value = ember::core::Value{std::int64_t{2}}},
                           {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
@@ -830,7 +827,7 @@ EMBER_TEST("native recursive calls preserve the VM result") {
     const auto vmReport = vm.execute(0, {std::int64_t{6}});
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{8}},
+                     jitReport.result.value == ember::core::Value{std::int64_t{8}},
                  "native recursive bridge calls match the VM result");
 #if EMBER_HAS_WIN64_JIT
     const auto* recursive = jitVm.function(0);
@@ -851,32 +848,31 @@ EMBER_TEST("shared dynamic frame budget bounds mixed native and VM recursion") {
                  .code = {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{0}}},
+                           .value = ember::core::Value{std::int64_t{0}}},
                           {.opcode = Opcode::greaterI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::jumpIfFalse, .operand = 9, .value = std::nullopt},
                           {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{1}}},
+                           .value = ember::core::Value{std::int64_t{1}}},
                           {.opcode = Opcode::subI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{0}}},
+                           .value = ember::core::Value{std::int64_t{0}}},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
                 {.id = 1,
                  .kind = FunctionKind::user,
                  .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
                  .localCount = 2,
                  .localTypes = {Type::i64, Type::boolean},
-                 .code = {{.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{true}},
-                          {.opcode = Opcode::store, .operand = 1, .value = std::nullopt},
-                          {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-                          {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
-                          {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
+                 .code =
+                     {{.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{true}},
+                      {.opcode = Opcode::store, .operand = 1, .value = std::nullopt},
+                      {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::call, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
             }};
     };
     auto jitProgram = verify(makeProgram());
@@ -896,7 +892,7 @@ EMBER_TEST("shared dynamic frame budget bounds mixed native and VM recursion") {
     const auto jitOverLimit = jitVm.execute(0, {std::int64_t{2048}});
     const auto vmOverLimit = vm.execute(0, {std::int64_t{2048}});
     tests.expect(!jitAtLimit.result.error && !vmAtLimit.result.error &&
-                     jitAtLimit.result.value == ember::bytecode::Value{std::int64_t{0}} &&
+                     jitAtLimit.result.value == ember::core::Value{std::int64_t{0}} &&
                      jitAtLimit.result.value == vmAtLimit.result.value,
                  "mixed-tier recursion succeeds at the shared frame-budget boundary");
     tests.expect(jitOverLimit.result.error && vmOverLimit.result.error &&
@@ -921,7 +917,7 @@ EMBER_TEST("native caller dispatches a bool-local callee through the typed bridg
                  .localTypes = {},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{41}}},
+                           .value = ember::core::Value{std::int64_t{41}}},
                           {.opcode = Opcode::call, .operand = 1, .value = std::nullopt},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
                 {.id = 1,
@@ -929,16 +925,15 @@ EMBER_TEST("native caller dispatches a bool-local callee through the typed bridg
                  .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
                  .localCount = 1,
                  .localTypes = {Type::i64},
-                 .code = {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-                          {.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{true}},
-                          {.opcode = Opcode::jumpIfFalse, .operand = 5, .value = std::nullopt},
-                          {.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{1}}},
-                          {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
-                          {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
+                 .code =
+                     {{.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{true}},
+                      {.opcode = Opcode::jumpIfFalse, .operand = 5, .value = std::nullopt},
+                      {.opcode = Opcode::constant,
+                       .operand = 0,
+                       .value = ember::core::Value{std::int64_t{1}}},
+                      {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
             }};
     };
     auto jitProgram = verify(makeProgram());
@@ -957,7 +952,7 @@ EMBER_TEST("native caller dispatches a bool-local callee through the typed bridg
     const auto vmReport = vm.execute(0);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{42}},
+                     jitReport.result.value == ember::core::Value{std::int64_t{42}},
                  "native caller receives the same result from the VM-only callee");
 #if EMBER_HAS_WIN64_JIT
     const auto* caller = jitVm.function(0);
@@ -987,7 +982,7 @@ EMBER_TEST("zero-argument native bridge calls are accepted") {
                  .localTypes = {},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{42}}},
+                           .value = ember::core::Value{std::int64_t{42}}},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
             }};
     };
@@ -1007,7 +1002,7 @@ EMBER_TEST("zero-argument native bridge calls are accepted") {
     const auto vmReport = vm.execute(0);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{42}},
+                     jitReport.result.value == ember::core::Value{std::int64_t{42}},
                  "zero-argument native call matches VM execution");
 #if EMBER_HAS_WIN64_JIT
     tests.expect(jitVm.function(0)->tier() == ember::runtime::ExecutionTier::native &&
@@ -1032,20 +1027,19 @@ EMBER_TEST("zero-argument native callers fall back to VM callees") {
                  .signature = {.parameterTypes = {}, .returnType = Type::i64},
                  .localCount = 1,
                  .localTypes = {Type::boolean},
-                 .code = {{.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{true}},
-                          {.opcode = Opcode::store, .operand = 0, .value = std::nullopt},
-                          {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
-                          {.opcode = Opcode::jumpIfFalse, .operand = 6, .value = std::nullopt},
-                          {.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{42}}},
-                          {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt},
-                          {.opcode = Opcode::constant,
-                           .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{0}}},
-                          {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
+                 .code =
+                     {{.opcode = Opcode::constant, .operand = 0, .value = ember::core::Value{true}},
+                      {.opcode = Opcode::store, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::jumpIfFalse, .operand = 6, .value = std::nullopt},
+                      {.opcode = Opcode::constant,
+                       .operand = 0,
+                       .value = ember::core::Value{std::int64_t{42}}},
+                      {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt},
+                      {.opcode = Opcode::constant,
+                       .operand = 0,
+                       .value = ember::core::Value{std::int64_t{0}}},
+                      {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
             }};
     };
     auto jitProgram = verify(makeProgram());
@@ -1064,7 +1058,7 @@ EMBER_TEST("zero-argument native callers fall back to VM callees") {
     const auto vmReport = vm.execute(0);
     tests.expect(!jitReport.result.error && !vmReport.result.error &&
                      jitReport.result.value == vmReport.result.value &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{42}},
+                     jitReport.result.value == ember::core::Value{std::int64_t{42}},
                  "zero-argument native typed call preserves the VM result");
 #if EMBER_HAS_WIN64_JIT
     tests.expect(jitVm.function(0)->tier() == ember::runtime::ExecutionTier::native &&
@@ -1096,8 +1090,7 @@ EMBER_TEST("guarded division publishes natively and preserves the VM result") {
         {.hotThreshold = 1, .jitEnabled = true, .profilingEnabled = true});
     const auto report = vm.execute(0, {std::int64_t{12}, std::int64_t{3}});
     const auto* function = vm.function(0);
-    tests.expect(!report.result.error &&
-                     report.result.value == ember::bytecode::Value{std::int64_t{4}},
+    tests.expect(!report.result.error && report.result.value == ember::core::Value{std::int64_t{4}},
                  "guarded native division retains the VM result");
     tests.expect(function != nullptr && function->profiling().isHot
 #if EMBER_HAS_WIN64_JIT
@@ -1172,12 +1165,12 @@ EMBER_TEST("native i64 wrap arithmetic and signed comparisons match the VM") {
                     {.opcode = Opcode::jumpIfFalse, .operand = 6, .value = std::nullopt});
                 code.push_back({.opcode = Opcode::constant,
                                 .operand = 0,
-                                .value = ember::bytecode::Value{std::int64_t{1}}});
+                                .value = ember::core::Value{std::int64_t{1}}});
                 code.push_back(
                     {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt});
                 code.push_back({.opcode = Opcode::constant,
                                 .operand = 0,
-                                .value = ember::bytecode::Value{std::int64_t{0}}});
+                                .value = ember::core::Value{std::int64_t{0}}});
             }
             code.push_back({.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt});
             return Program{.functions = {{.id = 0,
@@ -1207,7 +1200,7 @@ EMBER_TEST("native i64 wrap arithmetic and signed comparisons match the VM") {
 #endif
             ;
         return !jitReport.result.error && !vmReport.result.error &&
-               jitReport.result.value == ember::bytecode::Value{expected} &&
+               jitReport.result.value == ember::core::Value{expected} &&
                jitReport.result.value == vmReport.result.value && tierIsExpected;
     };
 
@@ -1238,7 +1231,7 @@ EMBER_TEST("native i64 wrap arithmetic and signed comparisons match the VM") {
         const auto jitReport = jitVm.execute(0, {input});
         const auto vmReport = vm.execute(0, {input});
         return !jitReport.result.error && !vmReport.result.error &&
-               jitReport.result.value == ember::bytecode::Value{expected} &&
+               jitReport.result.value == ember::core::Value{expected} &&
                jitReport.result.value == vmReport.result.value;
     };
 
@@ -1267,21 +1260,21 @@ EMBER_TEST("optimized native constant CFG matches the unoptimized VM") {
                  .localTypes = {Type::i64},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{2}}},
+                           .value = ember::core::Value{std::int64_t{2}}},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{3}}},
+                           .value = ember::core::Value{std::int64_t{3}}},
                           {.opcode = Opcode::addI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::store, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{20}}},
+                           .value = ember::core::Value{std::int64_t{20}}},
                           {.opcode = Opcode::equalI64, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::jumpIfFalse, .operand = 10, .value = std::nullopt},
                           {.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{99}}},
+                           .value = ember::core::Value{std::int64_t{99}}},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::load, .operand = 0, .value = std::nullopt},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
@@ -1314,7 +1307,7 @@ EMBER_TEST("optimized native constant CFG matches the unoptimized VM") {
     const auto* unoptimizedFunction = unoptimizedVm.function(0);
     tests.expect(!jitReport.result.error && !unoptimizedReport.result.error &&
                      !vmReport.result.error &&
-                     jitReport.result.value == ember::bytecode::Value{std::int64_t{5}} &&
+                     jitReport.result.value == ember::core::Value{std::int64_t{5}} &&
                      jitReport.result.value == unoptimizedReport.result.value &&
                      jitReport.result.value == vmReport.result.value && function != nullptr &&
                      unoptimizedFunction != nullptr
@@ -1439,7 +1432,7 @@ EMBER_TEST("optimized and unoptimized native code preserve bridge failures") {
                  .localTypes = {},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{7}}},
+                           .value = ember::core::Value{std::int64_t{7}}},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
             }};
     };
@@ -1482,7 +1475,7 @@ EMBER_TEST("injected native compilation failure retains VM dispatch and result")
               .localTypes = {},
               .code = {{.opcode = Opcode::constant,
                         .operand = 0,
-                        .value = ember::bytecode::Value{std::int64_t{42}}},
+                        .value = ember::core::Value{std::int64_t{42}}},
                        {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
          }});
     if (!verified) {
@@ -1498,7 +1491,7 @@ EMBER_TEST("injected native compilation failure retains VM dispatch and result")
     const auto report = vm.execute(0);
     const auto* function = vm.function(0);
     tests.expect(
-        !report.result.error && report.result.value == ember::bytecode::Value{std::int64_t{42}} &&
+        !report.result.error && report.result.value == ember::core::Value{std::int64_t{42}} &&
             function != nullptr && function->profiling().isHot &&
             function->tier() == ember::runtime::ExecutionTier::virtualMachine &&
             !ember::runtime::test::RuntimeFunctionAccess::hasNativeEntry(*function) &&
@@ -1519,11 +1512,11 @@ EMBER_TEST("native lifecycle failpoints retain VM dispatch and release executabl
                  .localTypes = {},
                  .code = {{.opcode = Opcode::constant,
                            .operand = 0,
-                           .value = ember::bytecode::Value{std::int64_t{42}}},
+                           .value = ember::core::Value{std::int64_t{42}}},
                           {.opcode = Opcode::returnValue, .operand = 0, .value = std::nullopt}}},
             }};
     };
-    const auto expected = ember::bytecode::Value{std::int64_t{42}};
+    const auto expected = ember::core::Value{std::int64_t{42}};
     tests.expect(ember::runtime::test::NativeCodeHandleAccess::liveExecutableAllocationCount() == 0,
                  "lifecycle test starts without a live executable allocation");
 

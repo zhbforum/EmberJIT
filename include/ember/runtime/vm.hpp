@@ -16,7 +16,7 @@ struct RuntimeError {
     std::string message;
 };
 struct ExecutionResult {
-    std::optional<bytecode::Value> value;
+    std::optional<core::Value> value;
     std::optional<RuntimeError> error;
 };
 
@@ -32,9 +32,9 @@ class VirtualMachine {
 public:
     [[nodiscard]] static VirtualMachine create(bytecode::VerifiedProgram verifiedProgram,
                                                RuntimeOptions options = {});
-    [[nodiscard]] ExecutionReport execute(semantic::FunctionId entry,
-                                          const std::vector<bytecode::Value>& arguments = {});
-    [[nodiscard]] const RuntimeFunction* function(semantic::FunctionId id) const noexcept;
+    [[nodiscard]] ExecutionReport execute(core::FunctionId entry,
+                                          const std::vector<core::Value>& arguments = {});
+    [[nodiscard]] const RuntimeFunction* function(core::FunctionId id) const noexcept;
 
 private:
     struct NativeCallState {
@@ -46,8 +46,8 @@ private:
     };
 
     explicit VirtualMachine(bytecode::VerifiedProgram verifiedProgram, RuntimeOptions options);
-    [[nodiscard]] ExecutionResult executeInternal(semantic::FunctionId entry,
-                                                  const std::vector<bytecode::Value>& arguments,
+    [[nodiscard]] ExecutionResult executeInternal(core::FunctionId entry,
+                                                  const std::vector<core::Value>& arguments,
                                                   NativeCallState& state,
                                                   bool forceVm = false);
     [[nodiscard]] static std::uint64_t nativeCallBridge(jit::NativeFrame* caller,

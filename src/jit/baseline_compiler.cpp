@@ -16,9 +16,8 @@ namespace {
     return {.code = std::nullopt, .error = BaselineCompileError::unsupportedFunction};
 }
 
-[[nodiscard]] bool isNativeValue(semantic::Type type) noexcept {
-    return type == semantic::Type::i64 || type == semantic::Type::f64 ||
-           type == semantic::Type::boolean;
+[[nodiscard]] bool isNativeValue(core::Type type) noexcept {
+    return type == core::Type::i64 || type == core::Type::f64 || type == core::Type::boolean;
 }
 
 [[nodiscard]] std::optional<std::int32_t> byteOffset(std::size_t slot) {
@@ -40,12 +39,12 @@ constexpr std::size_t maximumNativeFrameSlots = 65'536;
         if (parameter.opcode != ir::Opcode::parameter || parameter.result != index ||
             parameter.local != index || parameter.input != ir::noValue ||
             parameter.left != ir::noValue || parameter.right != ir::noValue ||
-            parameter.constant != 0 || parameter.callee != ir::noFunction ||
-            parameter.calleeKind != semantic::FunctionKind::user || !parameter.arguments.empty() ||
+            parameter.constant != 0 || parameter.callee != core::noFunction ||
+            parameter.calleeKind != core::FunctionKind::user || !parameter.arguments.empty() ||
             store.opcode != ir::Opcode::storeLocal || store.result != ir::noValue ||
             store.input != index || store.left != ir::noValue || store.right != ir::noValue ||
-            store.local != index || store.constant != 0 || store.callee != ir::noFunction ||
-            store.calleeKind != semantic::FunctionKind::user || !store.arguments.empty())
+            store.local != index || store.constant != 0 || store.callee != core::noFunction ||
+            store.calleeKind != core::FunctionKind::user || !store.arguments.empty())
             return false;
     }
     return true;
@@ -139,16 +138,16 @@ BaselineCompileResult BaselineCompiler::compile(const ir::VerifiedFunction& veri
             instruction.arguments.size() != target->signature.parameterTypes.size())
             return false;
         const bool voidCall = instruction.opcode == ir::Opcode::callVoid;
-        if (voidCall != (target->signature.returnType == semantic::Type::voidType) ||
+        if (voidCall != (target->signature.returnType == core::Type::voidType) ||
             (!voidCall &&
              (instruction.result == ir::noValue ||
               instruction.result >= function.valueTypes.size() ||
               function.valueTypes[instruction.result] != target->signature.returnType)))
             return false;
         if (instruction.opcode == ir::Opcode::callI64 &&
-            (target->signature.returnType != semantic::Type::i64 ||
+            (target->signature.returnType != core::Type::i64 ||
              !std::ranges::all_of(target->signature.parameterTypes,
-                                  [](semantic::Type type) { return type == semantic::Type::i64; })))
+                                  [](core::Type type) { return type == core::Type::i64; })))
             return false;
         for (std::size_t index{}; index < instruction.arguments.size(); ++index) {
             const auto argument = instruction.arguments[index];
@@ -388,7 +387,7 @@ BaselineCompileResult BaselineCompiler::compile(const ir::VerifiedFunction& veri
             case ir::Opcode::callVoid: {
                 if (!callMatchesTrustedTarget(instruction))
                     return unsupported();
-                if (instruction.calleeKind == semantic::FunctionKind::host) {
+                if (instruction.calleeKind == core::FunctionKind::host) {
                     const auto* builtin = bytecode::findBuiltin(instruction.callee);
                     const auto* target = verified.callTargets().find(instruction.callee);
                     if (builtin == nullptr || target == nullptr ||
@@ -397,7 +396,7 @@ BaselineCompileResult BaselineCompiler::compile(const ir::VerifiedFunction& veri
                         return unsupported();
                     if (instruction.arguments.size() != builtin->signature.parameterTypes.size() ||
                         (instruction.result == ir::noValue) !=
-                            (builtin->signature.returnType == semantic::Type::voidType))
+                            (builtin->signature.returnType == core::Type::voidType))
                         return unsupported();
                     for (std::size_t index{}; index < instruction.arguments.size(); ++index)
                         if (function.valueTypes[instruction.arguments[index]] !=
