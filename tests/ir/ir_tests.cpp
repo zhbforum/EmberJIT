@@ -1,11 +1,18 @@
 #include "ember/bytecode/bytecode.hpp"
+#include "ember/bytecode/lowering.hpp"
+#include "ember/core/function.hpp"
+#include "ember/core/type.hpp"
+#include "ember/core/value.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
 #include "ember/ir/bytecode_lowerer.hpp"
 #include "ember/ir/dump.hpp"
+#include "ember/ir/ir.hpp"
 #include "ember/ir/optimization.hpp"
 #include "ember/ir/verifier.hpp"
 #include "ember/semantic/analyzer.hpp"
+#include "ember/support/source.hpp"
+#include "ember/support/source_location.hpp"
 
 #include "test_harness.hpp"
 
@@ -17,6 +24,7 @@
 #include <vector>
 
 namespace {
+using ember::core::Type;
 using ember::ir::BasicBlock;
 using ember::ir::BlockId;
 using ember::ir::Function;
@@ -24,7 +32,6 @@ using ember::ir::Instruction;
 using ember::ir::Opcode;
 using ember::ir::Terminator;
 using ember::ir::TerminatorKind;
-using ember::semantic::Type;
 
 [[nodiscard]] auto
 compileAndVerify(std::string sourceText) -> std::optional<ember::bytecode::VerifiedProgram> {
@@ -65,7 +72,7 @@ compileAndVerify(std::string sourceText) -> std::optional<ember::bytecode::Verif
     const auto verified = ember::bytecode::Verifier{}.verify(
         {.functions = {
              {.id = 7,
-              .kind = ember::semantic::FunctionKind::user,
+              .kind = ember::core::FunctionKind::user,
               .signature = {.parameterTypes = {Type::i64}, .returnType = Type::i64},
               .localCount = 1,
               .localTypes = {Type::i64},
@@ -75,7 +82,7 @@ compileAndVerify(std::string sourceText) -> std::optional<ember::bytecode::Verif
                     .operand = 0,
                     .value = std::nullopt}}},
              {.id = 8,
-              .kind = ember::semantic::FunctionKind::user,
+              .kind = ember::core::FunctionKind::user,
               .signature = {.parameterTypes = {Type::i64, Type::i64}, .returnType = Type::i64},
               .localCount = 2,
               .localTypes = {Type::i64, Type::i64},
@@ -86,7 +93,7 @@ compileAndVerify(std::string sourceText) -> std::optional<ember::bytecode::Verif
                         .operand = 0,
                         .value = std::nullopt}}},
              {.id = 9,
-              .kind = ember::semantic::FunctionKind::user,
+              .kind = ember::core::FunctionKind::user,
               .signature = {.parameterTypes = {}, .returnType = Type::voidType},
               .localCount = 0,
               .localTypes = {},
@@ -94,14 +101,14 @@ compileAndVerify(std::string sourceText) -> std::optional<ember::bytecode::Verif
                         .operand = 0,
                         .value = std::nullopt}}},
              {.id = 2,
-              .kind = ember::semantic::FunctionKind::host,
+              .kind = ember::core::FunctionKind::host,
               .signature = {.parameterTypes = {}, .returnType = Type::i64},
               .localCount = 0,
               .localTypes = {},
               .code = {}}}});
     if (!verified.program)
         return std::nullopt;
-    return ember::ir::CallTargetTable::fromVerifiedProgram(*verified.program);
+    return ember::ir::Lowerer::callTargetsFromVerifiedProgram(*verified.program);
 }
 
 EMBER_TEST("IR lowering creates explicit CFG blocks and virtual registers") {
@@ -350,18 +357,17 @@ EMBER_TEST("IR verifier enforces trusted typed call contracts") {
                                              {Type::f64, Type::i64})),
                  "call_i64 rejects an argument whose virtual-register type is not i64");
 
-    tests.expect(rejectsCall({.id = 0,
-                              .signature = {.parameterTypes = {}, .returnType = Type::f64},
-                              .localTypes = {},
-                              .valueTypes = {Type::f64},
-                              .blocks = {{.id = 0,
-                                          .instructions = {Instruction::callValue(
-                                              0,
-                                              2,
-                                              {},
-                                              ember::semantic::FunctionKind::host)},
-                                          .terminator = Terminator::returnValue(0)}}}),
-                 "call_value rejects an f64 result for the host clock_ms i64 signature");
+    tests.expect(
+        rejectsCall(
+            {.id = 0,
+             .signature = {.parameterTypes = {}, .returnType = Type::f64},
+             .localTypes = {},
+             .valueTypes = {Type::f64},
+             .blocks = {{.id = 0,
+                         .instructions =
+                             {Instruction::callValue(0, 2, {}, ember::core::FunctionKind::host)},
+                         .terminator = Terminator::returnValue(0)}}}),
+        "call_value rejects an f64 result for the host clock_ms i64 signature");
 
     tests.expect(rejectsCall({.id = 0,
                               .signature = {.parameterTypes = {}, .returnType = Type::voidType},
@@ -379,14 +385,14 @@ EMBER_TEST("IR verifier enforces trusted typed call contracts") {
                                              {Type::i64})),
                  "call_value rejects a void target");
 
-    tests.expect(rejectsCall(baseI64Function(
-                     {{.id = 0,
-                       .instructions =
-                           {Instruction::constantI64(0, 1),
-                            Instruction::callI64(1, 7, {0}, ember::semantic::FunctionKind::host)},
-                       .terminator = Terminator::returnValue(1)}},
-                     {Type::i64, Type::i64})),
-                 "call rejects callee-kind metadata that differs from the trusted target");
+    tests.expect(
+        rejectsCall(baseI64Function(
+            {{.id = 0,
+              .instructions = {Instruction::constantI64(0, 1),
+                               Instruction::callI64(1, 7, {0}, ember::core::FunctionKind::host)},
+              .terminator = Terminator::returnValue(1)}},
+            {Type::i64, Type::i64})),
+        "call rejects callee-kind metadata that differs from the trusted target");
 
     tests.expect(rejectsCall(baseI64Function({{.id = 0,
                                                .instructions = {Instruction::constantI64(0, 1),
@@ -399,7 +405,7 @@ EMBER_TEST("IR verifier enforces trusted typed call contracts") {
                                              .instructions = {Instruction::constantI64(0, 1)},
                                              .terminator = Terminator::returnValue(0)}},
                                            {Type::i64});
-    nonCallMetadata.blocks[0].instructions[0].calleeKind = ember::semantic::FunctionKind::host;
+    nonCallMetadata.blocks[0].instructions[0].calleeKind = ember::core::FunctionKind::host;
     tests.expect(rejectsCall(std::move(nonCallMetadata)),
                  "non-call instructions reject non-default callee metadata");
 }
@@ -501,14 +507,14 @@ EMBER_TEST("IR lowering materializes every native v0.1 value form") {
     auto stackEdgeProgram = ember::bytecode::Verifier{}.verify(
         {.functions = {
              {.id = 0,
-              .kind = ember::semantic::FunctionKind::user,
+              .kind = ember::core::FunctionKind::user,
               .signature = {.parameterTypes = {}, .returnType = Type::i64},
               .localCount = 0,
               .localTypes = {},
               .code = {
                   {.opcode = ember::bytecode::Opcode::constant,
                    .operand = 0,
-                   .value = ember::bytecode::Value{std::int64_t{1}}},
+                   .value = ember::core::Value{std::int64_t{1}}},
                   {.opcode = ember::bytecode::Opcode::jump, .operand = 2, .value = std::nullopt},
                   {.opcode = ember::bytecode::Opcode::returnValue,
                    .operand = 0,
