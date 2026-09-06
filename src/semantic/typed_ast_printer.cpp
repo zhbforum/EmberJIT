@@ -28,12 +28,12 @@ private:
     }
     void functionLine(const TypedFunctionDeclaration& function) {
         output_ << std::string(indent_ * 2, ' ') << "Function " << function.name << " #"
-                << function.id << " -> " << typeName(function.signature.returnType) << " ["
+                << function.id << " -> " << core::typeName(function.signature.returnType) << " ["
                 << function.span.begin << ", " << function.span.end << ")\n";
         ++indent_;
         for (const auto& parameter : function.parameters)
             output_ << std::string(indent_ * 2, ' ') << "Parameter " << text(parameter.nameSpan)
-                    << " #" << parameter.symbol << ": " << typeName(parameter.type) << " ["
+                    << " #" << parameter.symbol << ": " << core::typeName(parameter.type) << " ["
                     << parameter.span.begin << ", " << parameter.span.end << ")\n";
         block(function.body);
         --indent_;
@@ -51,7 +51,7 @@ private:
     }
     void statementNode(const TypedLetStatement& node, support::SourceSpan span) {
         output_ << std::string(indent_ * 2, ' ') << "Let " << text(node.nameSpan) << " #"
-                << node.symbol << ": " << typeName(node.type) << " [" << span.begin << ", "
+                << node.symbol << ": " << core::typeName(node.type) << " [" << span.begin << ", "
                 << span.end << ")\n";
         ++indent_;
         expression(*node.initializer);
@@ -59,8 +59,8 @@ private:
     }
     void statementNode(const TypedAssignmentStatement& node, support::SourceSpan span) {
         output_ << std::string(indent_ * 2, ' ') << "Assignment " << text(node.targetSpan) << " #"
-                << node.target << ": " << typeName(node.targetType) << " [" << span.begin << ", "
-                << span.end << ")\n";
+                << node.target << ": " << core::typeName(node.targetType) << " [" << span.begin
+                << ", " << span.end << ")\n";
         ++indent_;
         expression(*node.value);
         --indent_;
@@ -113,18 +113,18 @@ private:
     }
     void expressionNode(const TypedIdentifierExpression& node, const TypedExpression& value) {
         output_ << std::string(indent_ * 2, ' ') << "Identifier " << text(node.nameSpan) << " #"
-                << node.symbol << ": " << typeName(value.type) << " [" << value.span.begin << ", "
-                << value.span.end << ")\n";
+                << node.symbol << ": " << core::typeName(value.type) << " [" << value.span.begin
+                << ", " << value.span.end << ")\n";
     }
     void expressionNode(const TypedLiteralExpression& node, const TypedExpression& value) {
         output_ << std::string(indent_ * 2, ' ') << "Literal " << text(node.literalSpan) << ": "
-                << typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
+                << core::typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
                 << ")\n";
     }
     void expressionNode(const TypedUnaryExpression& node, const TypedExpression& value) {
         output_ << std::string(indent_ * 2, ' ') << "Unary "
                 << (node.operation == frontend::UnaryOperator::minus ? "minus" : "plus") << ": "
-                << typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
+                << core::typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
                 << ")\n";
         ++indent_;
         expression(*node.operand);
@@ -133,7 +133,7 @@ private:
     void expressionNode(const TypedBinaryExpression& node, const TypedExpression& value) {
         output_ << std::string(indent_ * 2, ' ') << "Binary "
                 << frontend::tokenKindName(binaryToken(node.operation)) << ": "
-                << typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
+                << core::typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
                 << ")\n";
         ++indent_;
         expression(*node.left);
@@ -142,7 +142,7 @@ private:
     }
     void expressionNode(const TypedCallExpression& node, const TypedExpression& value) {
         output_ << std::string(indent_ * 2, ' ') << "Call #" << node.callee << ": "
-                << typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
+                << core::typeName(value.type) << " [" << value.span.begin << ", " << value.span.end
                 << ")\n";
         ++indent_;
         for (const auto& argument : node.arguments)
@@ -150,7 +150,7 @@ private:
         --indent_;
     }
     void expressionNode(const TypedParenthesizedExpression& node, const TypedExpression& value) {
-        output_ << std::string(indent_ * 2, ' ') << "Parenthesized: " << typeName(value.type)
+        output_ << std::string(indent_ * 2, ' ') << "Parenthesized: " << core::typeName(value.type)
                 << " [" << value.span.begin << ", " << value.span.end << ")\n";
         ++indent_;
         expression(*node.expression);

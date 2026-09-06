@@ -12,12 +12,12 @@
 #include <variant>
 
 namespace {
+using ember::core::Type;
 using ember::frontend::Lexer;
 using ember::frontend::Parser;
 using ember::semantic::HostFunction;
 using ember::semantic::HostFunctionRegistry;
 using ember::semantic::SemanticAnalyzer;
-using ember::semantic::Type;
 using ember::support::SourceId;
 using ember::support::SourceText;
 
@@ -87,7 +87,7 @@ EMBER_TEST("semantic analyzer preserves resolved symbols and function kinds") {
     if (result.program == nullptr)
         return;
     tests.expect(result.program->functions.size() == 1 &&
-                     result.program->functions.front().kind == ember::semantic::FunctionKind::user,
+                     result.program->functions.front().kind == ember::core::FunctionKind::user,
                  "typed program records user function symbol");
     const auto& body = result.program->declarations.front().body;
     const auto* declaration =
@@ -134,7 +134,8 @@ EMBER_TEST("semantic analyzer accepts registered host function signatures") {
     const auto parsed = Parser{}.parse(source, lexed.tokens);
     HostFunctionRegistry hosts;
     const bool registered = hosts.add(
-        HostFunction{.name = "print_i64",
+        HostFunction{.id = ember::core::FunctionId{7},
+                     .name = "print_i64",
                      .signature = {.parameterTypes = {Type::i64}, .returnType = Type::voidType}});
     const auto result = SemanticAnalyzer{}.analyze(*parsed.program, source, hosts);
     tests.expect(registered, "host registry accepts unique function");
@@ -148,9 +149,25 @@ EMBER_TEST("semantic analyzer accepts registered host function signatures") {
         statement == nullptr
             ? nullptr
             : std::get_if<ember::semantic::TypedCallExpression>(&statement->expression->node);
-    tests.expect(call != nullptr && result.program->functions.at(call->callee).kind ==
-                                        ember::semantic::FunctionKind::host,
-                 "host call retains resolved host function ID");
+    tests.expect(call != nullptr && call->callee == ember::core::FunctionId{7},
+                 "host call retains the explicitly registered function ID");
+}
+
+EMBER_TEST("semantic analyzer rejects user IDs after the final host ID") {
+    const SourceText source{SourceId{85}, "exhausted_ids.ember", "fn main() -> void { return; }"};
+    const auto lexed = Lexer{}.lex(source);
+    const auto parsed = Parser{}.parse(source, lexed.tokens);
+    HostFunctionRegistry hosts;
+    const bool registered =
+        hosts.add(HostFunction{.id = ember::core::noFunction - 1U,
+                               .name = "final_host_id",
+                               .signature = {.parameterTypes = {}, .returnType = Type::voidType}});
+    const auto result = SemanticAnalyzer{}.analyze(*parsed.program, source, hosts);
+
+    tests.expect(registered, "host registry accepts the final usable function ID");
+    tests.expect(result.program == nullptr && result.diagnostics.size() == 1 &&
+                     result.diagnostics.front().code == "E3001",
+                 "user function allocation rejects an exhausted function ID space");
 }
 
 EMBER_TEST("semantic analyzer handles mutual recursion and host registry failures") {
@@ -163,12 +180,19 @@ EMBER_TEST("semantic analyzer handles mutual recursion and host registry failure
 
     HostFunctionRegistry hosts;
     const bool first = hosts.add(
-        HostFunction{.name = "host",
+        HostFunction{.id = ember::core::FunctionId{0},
+                     .name = "host",
                      .signature = {.parameterTypes = {Type::i64}, .returnType = Type::voidType}});
     const bool duplicate =
-        hosts.add(HostFunction{.name = "host",
+        hosts.add(HostFunction{.id = ember::core::FunctionId{1},
+                               .name = "host",
                                .signature = {.parameterTypes = {}, .returnType = Type::voidType}});
-    tests.expect(first && !duplicate, "host registry rejects duplicate names");
+    const bool duplicateId =
+        hosts.add(HostFunction{.id = ember::core::FunctionId{0},
+                               .name = "other_host",
+                               .signature = {.parameterTypes = {}, .returnType = Type::voidType}});
+    tests.expect(first && !duplicate && !duplicateId,
+                 "host registry rejects duplicate names and function IDs");
 
     const SourceText collisionSource{SourceId{83},
                                      "collision.ember",
@@ -182,6 +206,7 @@ EMBER_TEST("semantic analyzer handles mutual recursion and host registry failure
 
     HostFunctionRegistry invalidHosts;
     const bool invalidRegistered = invalidHosts.add(HostFunction{
+        .id = ember::core::FunctionId{0},
         .name = "invalid",
         .signature = {.parameterTypes = {Type::voidType}, .returnType = Type::voidType}});
     const SourceText invalidSource{SourceId{84},

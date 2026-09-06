@@ -1,34 +1,18 @@
 #pragma once
 
+#include "ember/core/function.hpp"
+#include "ember/core/value.hpp"
 #include "ember/frontend/ast.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <variant>
 #include <vector>
 
 namespace ember::semantic {
 
-enum class Type { i64, f64, boolean, voidType };
 using SymbolId = std::uint32_t;
-using FunctionId = std::uint32_t;
-enum class FunctionKind { user, host };
-
-[[nodiscard]] constexpr auto typeName(Type type) noexcept -> std::string_view {
-    switch (type) {
-    case Type::i64:
-        return "i64";
-    case Type::f64:
-        return "f64";
-    case Type::boolean:
-        return "bool";
-    case Type::voidType:
-        return "void";
-    }
-    return "<invalid-type>";
-}
 
 struct TypedExpression;
 struct TypedStatement;
@@ -41,10 +25,9 @@ struct TypedIdentifierExpression {
     support::SourceSpan nameSpan;
     SymbolId symbol;
 };
-using LiteralValue = std::variant<std::int64_t, double, bool>;
 struct TypedLiteralExpression {
     support::SourceSpan literalSpan;
-    LiteralValue value;
+    core::Value value;
 };
 struct TypedUnaryExpression {
     frontend::UnaryOperator operation;
@@ -59,7 +42,7 @@ struct TypedBinaryExpression {
 };
 struct TypedCallExpression {
     support::SourceSpan calleeSpan;
-    FunctionId callee;
+    core::FunctionId callee;
     std::vector<TypedExpressionPtr> arguments;
 };
 struct TypedParenthesizedExpression {
@@ -68,7 +51,7 @@ struct TypedParenthesizedExpression {
 
 struct TypedExpression {
     support::SourceSpan span;
-    Type type;
+    core::Type type;
     std::variant<TypedIdentifierExpression,
                  TypedLiteralExpression,
                  TypedUnaryExpression,
@@ -81,13 +64,13 @@ struct TypedExpression {
 struct TypedLetStatement {
     support::SourceSpan nameSpan;
     SymbolId symbol;
-    Type type;
+    core::Type type;
     TypedExpressionPtr initializer;
 };
 struct TypedAssignmentStatement {
     support::SourceSpan targetSpan;
     SymbolId target;
-    Type targetType;
+    core::Type targetType;
     TypedExpressionPtr value;
 };
 struct TypedReturnStatement {
@@ -126,24 +109,20 @@ struct TypedParameter {
     support::SourceSpan span;
     support::SourceSpan nameSpan;
     SymbolId symbol;
-    Type type;
-};
-struct FunctionSignature {
-    std::vector<Type> parameterTypes;
-    Type returnType;
+    core::Type type;
 };
 struct ResolvedFunction {
-    FunctionId id;
-    FunctionKind kind;
+    core::FunctionId id;
+    core::FunctionKind kind;
     std::string name;
-    FunctionSignature signature;
+    core::FunctionSignature signature;
 };
 struct TypedFunctionDeclaration {
     support::SourceSpan span;
     support::SourceSpan nameSpan;
-    FunctionId id;
+    core::FunctionId id;
     std::string name;
-    FunctionSignature signature;
+    core::FunctionSignature signature;
     std::vector<TypedParameter> parameters;
     TypedBlock body;
 };
