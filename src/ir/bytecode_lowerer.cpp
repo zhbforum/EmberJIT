@@ -22,7 +22,7 @@ namespace {
             .primarySpan = {}};
 }
 
-[[nodiscard]] std::string atPc(semantic::FunctionId id, std::size_t pc, std::string message) {
+[[nodiscard]] std::string atPc(core::FunctionId id, std::size_t pc, std::string message) {
     return "function #" + std::to_string(id) + ", pc " + std::to_string(pc) + ": " +
            std::move(message);
 }
@@ -99,8 +99,17 @@ namespace {
 }
 } // namespace
 
+CallTargetTable Lowerer::callTargetsFromVerifiedProgram(const bytecode::VerifiedProgram& program) {
+    std::vector<core::CallTarget> targets;
+    targets.reserve(program.program().functions.size());
+    for (const auto& function : program.program().functions)
+        targets.push_back(
+            {.id = function.id, .kind = function.kind, .signature = function.signature});
+    return CallTargetTable{std::move(targets)};
+}
+
 LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
-                              semantic::FunctionId functionId) const {
+                              core::FunctionId functionId) const {
     const auto& functions = program.program().functions;
     const auto found = std::find_if(
         functions.begin(),
@@ -113,7 +122,7 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
                                               "IR target function does not exist")}};
     }
     const auto& source = *found;
-    if (source.kind != semantic::FunctionKind::user) {
+    if (source.kind != core::FunctionKind::user) {
         return {.function = std::nullopt,
                 .failure = LoweringFailure::unsupported,
                 .diagnostics = {loweringError(LoweringFailure::unsupported,
@@ -176,7 +185,7 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
                       .localTypes = source.localTypes,
                       .valueTypes = {},
                       .blocks = {}};
-    const auto makeValue = [&function](semantic::Type type) {
+    const auto makeValue = [&function](core::Type type) {
         const auto value = static_cast<ValueId>(function.valueTypes.size());
         function.valueTypes.push_back(type);
         return value;
@@ -247,9 +256,9 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
                     return fail(LoweringFailure::unsupported,
                                 atPc(source.id, pc, "constant has no materialized value"));
                 const auto value = makeValue(
-                    std::holds_alternative<std::int64_t>(*instruction.value) ? semantic::Type::i64
-                    : std::holds_alternative<double>(*instruction.value)     ? semantic::Type::f64
-                                                                         : semantic::Type::boolean);
+                    std::holds_alternative<std::int64_t>(*instruction.value) ? core::Type::i64
+                    : std::holds_alternative<double>(*instruction.value)     ? core::Type::f64
+                                                                             : core::Type::boolean);
                 if (std::holds_alternative<std::int64_t>(*instruction.value))
                     block.instructions.push_back(
                         Instruction::constantI64(value,
@@ -297,8 +306,8 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
                         LoweringFailure::internalInvariant,
                         atPc(source.id, pc, "verified bytecode underflowed the lowering stack"));
                 if (*lowered == Opcode::negateI64 || *lowered == Opcode::negateF64) {
-                    const auto result = makeValue(
-                        *lowered == Opcode::negateI64 ? semantic::Type::i64 : semantic::Type::f64);
+                    const auto result = makeValue(*lowered == Opcode::negateI64 ? core::Type::i64
+                                                                                : core::Type::f64);
                     block.instructions.push_back(*lowered == Opcode::negateI64
                                                      ? Instruction::negateI64(result, *right)
                                                      : Instruction::negateF64(result, *right));
@@ -313,9 +322,9 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
                 const bool f64Operation = *lowered == Opcode::addF64 ||
                                           *lowered == Opcode::subF64 ||
                                           *lowered == Opcode::mulF64 || *lowered == Opcode::divF64;
-                const auto result = makeValue(isComparison(*lowered) ? semantic::Type::boolean
-                                              : f64Operation         ? semantic::Type::f64
-                                                                     : semantic::Type::i64);
+                const auto result = makeValue(isComparison(*lowered) ? core::Type::boolean
+                                              : f64Operation         ? core::Type::f64
+                                                                     : core::Type::i64);
                 block.instructions.push_back(Instruction::binary(*lowered, result, *left, *right));
                 stack.push_back(result);
                 continue;
@@ -342,16 +351,16 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
                             atPc(source.id, pc, "verified bytecode has an invalid call argument"));
                     arguments[index - 1] = *argument;
                 }
-                if (callee->signature.returnType == semantic::Type::voidType) {
+                if (callee->signature.returnType == core::Type::voidType) {
                     block.instructions.push_back(
                         Instruction::callVoid(callee->id, std::move(arguments), callee->kind));
                 } else {
                     const auto result = makeValue(callee->signature.returnType);
                     block.instructions.push_back(
-                        callee->signature.returnType == semantic::Type::i64 &&
+                        callee->signature.returnType == core::Type::i64 &&
                                 std::ranges::all_of(
                                     callee->signature.parameterTypes,
-                                    [](semantic::Type type) { return type == semantic::Type::i64; })
+                                    [](core::Type type) { return type == core::Type::i64; })
                             ? Instruction::callI64(result,
                                                    callee->id,
                                                    std::move(arguments),
@@ -381,7 +390,7 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
             }
             if (instruction.opcode == bytecode::Opcode::jumpIfFalse) {
                 const auto condition = pop(pc);
-                if (!condition || function.valueTypes[*condition] != semantic::Type::boolean)
+                if (!condition || function.valueTypes[*condition] != core::Type::boolean)
                     return fail(LoweringFailure::internalInvariant,
                                 atPc(source.id,
                                      pc,
@@ -442,8 +451,7 @@ LoweringResult Lowerer::lower(const bytecode::VerifiedProgram& program,
         function.blocks.push_back(std::move(block));
     }
 
-    auto verified =
-        Verifier{}.verify(std::move(function), CallTargetTable::fromVerifiedProgram(program));
+    auto verified = Verifier{}.verify(std::move(function), callTargetsFromVerifiedProgram(program));
     if (verified.function)
         return {.function = std::move(verified.function),
                 .failure = std::nullopt,

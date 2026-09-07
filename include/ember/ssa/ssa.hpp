@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ember/semantic/typed_ast.hpp"
+#include "ember/core/function.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -15,8 +15,6 @@ using ParameterIndex = std::uint32_t;
 inline constexpr ValueId noValue = std::numeric_limits<ValueId>::max();
 inline constexpr BlockId noBlock = std::numeric_limits<BlockId>::max();
 inline constexpr ParameterIndex noParameter = std::numeric_limits<ParameterIndex>::max();
-inline constexpr semantic::FunctionId noFunction = std::numeric_limits<semantic::FunctionId>::max();
-
 enum class Opcode : std::uint8_t {
     invalid,
     parameter,
@@ -61,8 +59,8 @@ struct Instruction {
     ValueId right{noValue};
     ParameterIndex parameterIndex{noParameter};
     std::int64_t constant{};
-    semantic::FunctionId callee{noFunction};
-    semantic::FunctionKind calleeKind{semantic::FunctionKind::user};
+    core::FunctionId callee{core::noFunction};
+    core::FunctionKind calleeKind{core::FunctionKind::user};
     std::vector<ValueId> arguments;
 
     [[nodiscard]] static Instruction parameter(ValueId result, ParameterIndex parameter) noexcept;
@@ -75,23 +73,23 @@ struct Instruction {
     binary(Opcode opcode, ValueId result, ValueId left, ValueId right) noexcept;
     [[nodiscard]] static Instruction
     callI64(ValueId result,
-            semantic::FunctionId callee,
+            core::FunctionId callee,
             std::vector<ValueId> arguments,
-            semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+            core::FunctionKind calleeKind = core::FunctionKind::user);
     [[nodiscard]] static Instruction
     callValue(ValueId result,
-              semantic::FunctionId callee,
+              core::FunctionId callee,
               std::vector<ValueId> arguments,
-              semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+              core::FunctionKind calleeKind = core::FunctionKind::user);
     [[nodiscard]] static Instruction
-    callVoid(semantic::FunctionId callee,
+    callVoid(core::FunctionId callee,
              std::vector<ValueId> arguments,
-             semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+             core::FunctionKind calleeKind = core::FunctionKind::user);
 };
 
 struct BlockParameter {
     ValueId value{noValue};
-    semantic::Type type{semantic::Type::voidType};
+    core::Type type{core::Type::voidType};
 };
 
 struct Edge {
@@ -130,9 +128,9 @@ struct BasicBlock {
 // `valueTypes[index]` is the type of SSA value `v<index>`. Void is a function
 // return type only and is never an SSA value or block-parameter type.
 struct Function {
-    semantic::FunctionId id{noFunction};
-    semantic::FunctionSignature signature;
-    std::vector<semantic::Type> valueTypes;
+    core::FunctionId id{core::noFunction};
+    core::FunctionSignature signature;
+    std::vector<core::Type> valueTypes;
     std::vector<BasicBlock> blocks;
 };
 } // namespace ember::ssa

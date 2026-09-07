@@ -7,33 +7,23 @@
 #include <utility>
 #include <vector>
 
-namespace ember::bytecode {
-class VerifiedProgram;
-}
-
 namespace ember::ir {
-struct CallTarget {
-    semantic::FunctionId id;
-    semantic::FunctionKind kind;
-    semantic::FunctionSignature signature;
-};
+class Lowerer;
 
-// Immutable call-target metadata copied exclusively from verified bytecode.
-// A VerifiedFunction retains it so every later verifier pass checks calls
-// against the same trusted signatures.
+// Immutable trusted call-target metadata retained by a VerifiedFunction so
+// every later verifier pass checks calls against the same signatures.
 class CallTargetTable {
 public:
-    [[nodiscard]] static CallTargetTable
-    fromVerifiedProgram(const bytecode::VerifiedProgram& program);
-    [[nodiscard]] const CallTarget* find(semantic::FunctionId id) const noexcept;
+    [[nodiscard]] const core::CallTarget* find(core::FunctionId id) const noexcept;
 
 private:
-    explicit CallTargetTable(std::vector<CallTarget> targets)
+    explicit CallTargetTable(std::vector<core::CallTarget> targets)
         : targets_(std::move(targets)) {
     }
 
-    std::vector<CallTarget> targets_;
+    std::vector<core::CallTarget> targets_;
     friend class Verifier;
+    friend class Lowerer;
 };
 
 class VerifiedFunction {

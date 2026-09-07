@@ -9,7 +9,7 @@
 
 namespace ember::runtime {
 struct HotFunctionEvent {
-    semantic::FunctionId functionId;
+    core::FunctionId functionId;
     std::uint64_t invocationCount;
 };
 
@@ -52,8 +52,8 @@ public:
           events_(events) {
     }
 
-    [[nodiscard]] std::optional<DispatchDecision>
-    dispatch(semantic::FunctionId functionId, std::span<const bytecode::Value> arguments);
+    [[nodiscard]] std::optional<DispatchDecision> dispatch(core::FunctionId functionId,
+                                                           std::span<const core::Value> arguments);
 
 private:
     RuntimeFunctionTable& functions_;

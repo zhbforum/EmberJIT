@@ -31,12 +31,12 @@ RuntimeFunctionTable::RuntimeFunctionTable(bytecode::VerifiedProgram verifiedPro
     }
 }
 
-const RuntimeFunction* RuntimeFunctionTable::find(semantic::FunctionId id) const noexcept {
+const RuntimeFunction* RuntimeFunctionTable::find(core::FunctionId id) const noexcept {
     const auto found = index_.find(id);
     return found == index_.end() ? nullptr : &functions_[found->second];
 }
 
-RuntimeFunction* RuntimeFunctionTable::findMutable(semantic::FunctionId id) noexcept {
+RuntimeFunction* RuntimeFunctionTable::findMutable(core::FunctionId id) noexcept {
     const auto found = index_.find(id);
     return found == index_.end() ? nullptr : &functions_[found->second];
 }

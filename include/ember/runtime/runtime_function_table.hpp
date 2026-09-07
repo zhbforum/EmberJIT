@@ -15,13 +15,13 @@ class RuntimeFunctionTable {
 public:
     RuntimeFunctionTable(bytecode::VerifiedProgram verifiedProgram, bool retainNativeSource);
 
-    [[nodiscard]] const RuntimeFunction* find(semantic::FunctionId id) const noexcept;
+    [[nodiscard]] const RuntimeFunction* find(core::FunctionId id) const noexcept;
 
 private:
-    [[nodiscard]] RuntimeFunction* findMutable(semantic::FunctionId id) noexcept;
+    [[nodiscard]] RuntimeFunction* findMutable(core::FunctionId id) noexcept;
 
     std::vector<RuntimeFunction> functions_;
-    std::unordered_map<semantic::FunctionId, std::size_t> index_;
+    std::unordered_map<core::FunctionId, std::size_t> index_;
 
     friend class RuntimeDispatcher;
 };

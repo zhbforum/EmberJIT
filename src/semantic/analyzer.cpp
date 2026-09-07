@@ -11,6 +11,11 @@
 namespace ember::semantic {
 namespace {
 
+using core::FunctionId;
+using core::FunctionKind;
+using core::FunctionSignature;
+using core::Type;
+
 [[nodiscard]] auto fromAst(frontend::TypeName type) noexcept -> Type {
     switch (type) {
     case frontend::TypeName::i64:
@@ -63,7 +68,11 @@ private:
             if (!validSignature(host.signature, programSpan, "host function")) {
                 return false;
             }
-            const auto function = ResolvedFunction{.id = nextFunctionId_++,
+            if (host.id == core::noFunction) {
+                fail(programSpan, "E3001", "host function has an invalid identifier");
+                return false;
+            }
+            const auto function = ResolvedFunction{.id = host.id,
                                                    .kind = FunctionKind::host,
                                                    .name = host.name,
                                                    .signature = host.signature};
@@ -72,6 +81,8 @@ private:
                 return false;
             }
             resolvedFunctions_.push_back(function);
+            if (host.id >= nextFunctionId_)
+                nextFunctionId_ = host.id + 1;
         }
         return true;
     }
@@ -84,6 +95,10 @@ private:
                 signature.parameterTypes.push_back(fromAst(parameter.type));
             }
             if (!validSignature(signature, function.nameSpan, "function")) {
+                return false;
+            }
+            if (nextFunctionId_ == core::noFunction) {
+                fail(function.nameSpan, "E3001", "function identifier space is exhausted");
                 return false;
             }
             const auto name = text(function.nameSpan);
@@ -645,8 +660,10 @@ private:
 } // namespace
 
 auto HostFunctionRegistry::add(HostFunction function) -> bool {
+    if (function.id == core::noFunction)
+        return false;
     for (const auto& existing : functions_) {
-        if (existing.name == function.name) {
+        if (existing.id == function.id || existing.name == function.name) {
             return false;
         }
     }

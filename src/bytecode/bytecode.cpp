@@ -1,17 +1,29 @@
 #include "ember/bytecode/bytecode.hpp"
 
 #include "ember/bytecode/builtins.hpp"
+#include "ember/core/function.hpp"
+#include "ember/core/type.hpp"
+#include "ember/core/value.hpp"
+#include "ember/support/diagnostic.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <queue>
+#include <span>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace ember::bytecode {
 void nativePrintI64(std::int64_t value) noexcept {
@@ -29,15 +41,15 @@ std::int64_t nativeClockMs() noexcept {
 }
 
 namespace {
-[[nodiscard]] bool hasType(const Value& value, semantic::Type type) noexcept {
-    return (type == semantic::Type::i64 && std::holds_alternative<std::int64_t>(value)) ||
-           (type == semantic::Type::f64 && std::holds_alternative<double>(value)) ||
-           (type == semantic::Type::boolean && std::holds_alternative<bool>(value));
+[[nodiscard]] bool hasType(const core::Value& value, core::Type type) noexcept {
+    return (type == core::Type::i64 && std::holds_alternative<std::int64_t>(value)) ||
+           (type == core::Type::f64 && std::holds_alternative<double>(value)) ||
+           (type == core::Type::boolean && std::holds_alternative<bool>(value));
 }
 } // namespace
 
 BuiltinInvocation invokeBuiltin(const BuiltinDescriptor& builtin,
-                                std::span<const Value> arguments) noexcept {
+                                std::span<const core::Value> arguments) noexcept {
     if (arguments.size() != builtin.signature.parameterTypes.size())
         return {};
     for (std::size_t index{}; index < arguments.size(); ++index)
@@ -58,7 +70,7 @@ BuiltinInvocation invokeBuiltin(const BuiltinDescriptor& builtin,
     case BuiltinKind::clockMs:
         if (builtin.nativeAbi != NativeBuiltinAbi::voidToI64)
             return {};
-        return {.succeeded = true, .value = Value{nativeClockMs()}};
+        return {.succeeded = true, .value = core::Value{nativeClockMs()}};
     }
     return {};
 }
@@ -89,210 +101,43 @@ namespace {
             .message = std::move(message),
             .primarySpan = {}};
 }
-[[nodiscard]] auto valueType(const Value& value) -> semantic::Type {
+[[nodiscard]] auto valueType(const core::Value& value) -> core::Type {
     if (std::holds_alternative<std::int64_t>(value))
-        return semantic::Type::i64;
+        return core::Type::i64;
     if (std::holds_alternative<double>(value))
-        return semantic::Type::f64;
-    return semantic::Type::boolean;
+        return core::Type::f64;
+    return core::Type::boolean;
 }
-[[nodiscard]] auto binaryOpcode(frontend::BinaryOperator op, semantic::Type type) -> Opcode {
-    using enum frontend::BinaryOperator;
-    const bool f = type == semantic::Type::f64;
-    switch (op) {
-    case add:
-        return f ? Opcode::addF64 : Opcode::addI64;
-    case subtract:
-        return f ? Opcode::subF64 : Opcode::subI64;
-    case multiply:
-        return f ? Opcode::mulF64 : Opcode::mulI64;
-    case divide:
-        return f ? Opcode::divF64 : Opcode::divI64;
-    case remainder:
-        return Opcode::remI64;
-    case equal:
-        return f ? Opcode::equalF64
-                 : (type == semantic::Type::boolean ? Opcode::equalBool : Opcode::equalI64);
-    case notEqual:
-        return f ? Opcode::notEqualF64
-                 : (type == semantic::Type::boolean ? Opcode::notEqualBool : Opcode::notEqualI64);
-    case less:
-        return f ? Opcode::lessF64 : Opcode::lessI64;
-    case lessEqual:
-        return f ? Opcode::lessEqualF64 : Opcode::lessEqualI64;
-    case greater:
-        return f ? Opcode::greaterF64 : Opcode::greaterI64;
-    case greaterEqual:
-        return f ? Opcode::greaterEqualF64 : Opcode::greaterEqualI64;
-    }
-    std::unreachable();
-}
-class FunctionCompiler {
-public:
-    explicit FunctionCompiler(const semantic::TypedFunctionDeclaration& declaration)
-        : function_{.id = declaration.id,
-                    .kind = semantic::FunctionKind::user,
-                    .signature = declaration.signature,
-                    .localCount = 0,
-                    .localTypes = {},
-                    .code = {}} {
-        for (const auto& parameter : declaration.parameters)
-            (void)slot(parameter.symbol, parameter.type);
-    }
-    [[nodiscard]] Function compile(const semantic::TypedBlock& body) {
-        block(body);
-        // The final terminator gives every compiler-emitted jump a concrete target. For a
-        // non-void function it is unreachable by the semantic analyzer's return-path proof.
-        emit(function_.signature.returnType == semantic::Type::voidType ? Opcode::returnVoid
-                                                                        : Opcode::returnValue);
-        function_.localCount = static_cast<std::uint32_t>(slots_.size());
-        return std::move(function_);
-    }
-
-private:
-    void emit(Opcode op, std::uint32_t operand = 0, std::optional<Value> value = std::nullopt) {
-        function_.code.push_back({op, operand, std::move(value)});
-    }
-    [[nodiscard]] std::uint32_t slot(semantic::SymbolId symbol,
-                                     semantic::Type type = semantic::Type::voidType) {
-        const auto [it, inserted] =
-            slots_.try_emplace(symbol, static_cast<std::uint32_t>(slots_.size()));
-        if (inserted)
-            function_.localTypes.push_back(type);
-        return it->second;
-    }
-    void expression(const semantic::TypedExpression& expr) {
-        std::visit([this, &expr](const auto& node) { expressionNode(node, expr.type); }, expr.node);
-    }
-    void expressionNode(const semantic::TypedIdentifierExpression& node, semantic::Type) {
-        emit(Opcode::load, slot(node.symbol));
-    }
-    void expressionNode(const semantic::TypedLiteralExpression& node, semantic::Type) {
-        emit(Opcode::constant, 0, node.value);
-    }
-    void expressionNode(const semantic::TypedParenthesizedExpression& node, semantic::Type) {
-        expression(*node.expression);
-    }
-    void expressionNode(const semantic::TypedUnaryExpression& node, semantic::Type type) {
-        expression(*node.operand);
-        switch (node.operation) {
-        case frontend::UnaryOperator::plus:
-            break;
-        case frontend::UnaryOperator::minus:
-            emit(type == semantic::Type::f64 ? Opcode::negateF64 : Opcode::negateI64);
-            break;
-        }
-    }
-    void expressionNode(const semantic::TypedBinaryExpression& node, semantic::Type) {
-        expression(*node.left);
-        expression(*node.right);
-        emit(binaryOpcode(node.operation, node.left->type));
-    }
-    void expressionNode(const semantic::TypedCallExpression& node, semantic::Type) {
-        for (const auto& argument : node.arguments)
-            expression(*argument);
-        emit(Opcode::call, node.callee);
-    }
-    void statement(const semantic::TypedStatement& statement) {
-        std::visit([this](const auto& node) { statementNode(node); }, statement.node);
-    }
-    void statementNode(const semantic::TypedLetStatement& node) {
-        expression(*node.initializer);
-        emit(Opcode::store, slot(node.symbol, node.type));
-    }
-    void statementNode(const semantic::TypedAssignmentStatement& node) {
-        expression(*node.value);
-        emit(Opcode::store, slot(node.target, node.targetType));
-    }
-    void statementNode(const semantic::TypedReturnStatement& node) {
-        if (node.value) {
-            expression(*node.value);
-            emit(Opcode::returnValue);
-        } else
-            emit(Opcode::returnVoid);
-    }
-    void statementNode(const semantic::TypedExpressionStatement& node) {
-        expression(*node.expression);
-        if (node.expression->type != semantic::Type::voidType)
-            emit(Opcode::pop);
-    }
-    void statementNode(const semantic::TypedBlockPtr& node) {
-        block(*node);
-    }
-    void statementNode(const semantic::TypedIfStatement& node) {
-        expression(*node.condition);
-        const auto falseJump = static_cast<std::uint32_t>(function_.code.size());
-        emit(Opcode::jumpIfFalse);
-        block(*node.thenBlock);
-        const auto endJump = static_cast<std::uint32_t>(function_.code.size());
-        emit(Opcode::jump);
-        function_.code[falseJump].operand = static_cast<std::uint32_t>(function_.code.size());
-        if (node.elseBranch)
-            statement(*node.elseBranch);
-        function_.code[endJump].operand = static_cast<std::uint32_t>(function_.code.size());
-    }
-    void statementNode(const semantic::TypedWhileStatement& node) {
-        const auto start = static_cast<std::uint32_t>(function_.code.size());
-        expression(*node.condition);
-        const auto exit = static_cast<std::uint32_t>(function_.code.size());
-        emit(Opcode::jumpIfFalse);
-        block(*node.body);
-        emit(Opcode::jump, start);
-        function_.code[exit].operand = static_cast<std::uint32_t>(function_.code.size());
-    }
-    void block(const semantic::TypedBlock& body) {
-        for (const auto& item : body.statements)
-            statement(item);
-    }
-    Function function_;
-    std::unordered_map<semantic::SymbolId, std::uint32_t> slots_;
-};
 } // namespace
-
-CompileResult Compiler::compile(const semantic::TypedProgram& program) const {
-    Program result;
-    result.functions.reserve(program.functions.size());
-    for (const auto& function : program.functions)
-        if (function.kind == semantic::FunctionKind::host)
-            result.functions.push_back({.id = function.id,
-                                        .kind = function.kind,
-                                        .signature = function.signature,
-                                        .localCount = 0,
-                                        .localTypes = {},
-                                        .code = {}});
-    for (const auto& declaration : program.declarations)
-        result.functions.push_back(FunctionCompiler{declaration}.compile(declaration.body));
-    return {.program = std::move(result), .diagnostics = {}};
-}
 
 VerifyResult Verifier::verify(Program program) const {
     std::vector<support::Diagnostic> diagnostics;
-    const auto validType = [](semantic::Type type) {
-        return type == semantic::Type::i64 || type == semantic::Type::f64 ||
-               type == semantic::Type::boolean || type == semantic::Type::voidType;
+    const auto validType = [](core::Type type) {
+        return type == core::Type::i64 || type == core::Type::f64 || type == core::Type::boolean ||
+               type == core::Type::voidType;
     };
-    const auto validSignature = [&validType](const semantic::FunctionSignature& signature) {
+    const auto validSignature = [&validType](const core::FunctionSignature& signature) {
         if (!validType(signature.returnType))
             return false;
         for (const auto type : signature.parameterTypes)
-            if (!validType(type) || type == semantic::Type::voidType)
+            if (!validType(type) || type == core::Type::voidType)
                 return false;
         return true;
     };
-    std::unordered_map<semantic::FunctionId, const Function*> functions;
+    std::unordered_map<core::FunctionId, const Function*> functions;
     for (const auto& function : program.functions) {
         if (!functions.try_emplace(function.id, &function).second)
             diagnostics.push_back(error("duplicate function id"));
         if (!validSignature(function.signature))
             diagnostics.push_back(error("function has an invalid signature type"));
-        if (function.kind == semantic::FunctionKind::host) {
+        if (function.kind == core::FunctionKind::host) {
             const auto* builtin = findBuiltin(function.id);
             if (builtin == nullptr ||
                 builtin->signature.parameterTypes != function.signature.parameterTypes ||
                 builtin->signature.returnType != function.signature.returnType ||
                 function.localCount != 0 || !function.localTypes.empty() || !function.code.empty())
                 diagnostics.push_back(error("host function does not match the builtin registry"));
-        } else if (function.kind != semantic::FunctionKind::user)
+        } else if (function.kind != core::FunctionKind::user)
             diagnostics.push_back(error("function has an invalid kind"));
     }
 
@@ -307,7 +152,7 @@ VerifyResult Verifier::verify(Program program) const {
     };
 
     for (const auto& function : program.functions) {
-        if (function.kind != semantic::FunctionKind::user)
+        if (function.kind != core::FunctionKind::user)
             continue;
         if (function.code.empty() || function.localTypes.size() != function.localCount ||
             function.localCount < function.signature.parameterTypes.size()) {
@@ -316,7 +161,7 @@ VerifyResult Verifier::verify(Program program) const {
         }
         for (std::size_t slot = 0; slot < function.localTypes.size(); ++slot) {
             if (!validType(function.localTypes[slot]) ||
-                function.localTypes[slot] == semantic::Type::voidType ||
+                function.localTypes[slot] == core::Type::voidType ||
                 (slot < function.signature.parameterTypes.size() &&
                  function.localTypes[slot] != function.signature.parameterTypes[slot]))
                 diagnostics.push_back(error("function has invalid parameter/local type layout"));
@@ -384,11 +229,11 @@ VerifyResult Verifier::verify(Program program) const {
         return {.program = std::nullopt, .diagnostics = std::move(diagnostics)};
 
     struct State {
-        std::vector<semantic::Type> stack;
+        std::vector<core::Type> stack;
         std::vector<bool> initialized;
     };
     for (const auto& function : program.functions) {
-        if (function.kind != semantic::FunctionKind::user)
+        if (function.kind != core::FunctionKind::user)
             continue;
         std::vector<std::optional<State>> incoming(function.code.size());
         State entry{.stack = {}, .initialized = std::vector<bool>(function.localCount, false)};
@@ -402,7 +247,7 @@ VerifyResult Verifier::verify(Program program) const {
             State state = *incoming[pc];
             const auto& instruction = function.code[pc];
             const auto diagnosticCount = diagnostics.size();
-            const auto pop = [&](semantic::Type type) {
+            const auto pop = [&](core::Type type) {
                 if (state.stack.empty() || state.stack.back() != type) {
                     instructionError(function, pc, "stack type mismatch");
                     return false;
@@ -410,7 +255,7 @@ VerifyResult Verifier::verify(Program program) const {
                 state.stack.pop_back();
                 return true;
             };
-            const auto binary = [&](semantic::Type input, semantic::Type output) {
+            const auto binary = [&](core::Type input, core::Type output) {
                 if (state.stack.size() < 2 || state.stack.back() != input ||
                     state.stack[state.stack.size() - 2] != input) {
                     instructionError(function, pc, "stack type mismatch");
@@ -446,27 +291,27 @@ VerifyResult Verifier::verify(Program program) const {
                     instructionError(function, pc, "stack underflow");
                 break;
             case Opcode::negateI64:
-                valid = pop(semantic::Type::i64);
+                valid = pop(core::Type::i64);
                 if (valid)
-                    state.stack.push_back(semantic::Type::i64);
+                    state.stack.push_back(core::Type::i64);
                 break;
             case Opcode::negateF64:
-                valid = pop(semantic::Type::f64);
+                valid = pop(core::Type::f64);
                 if (valid)
-                    state.stack.push_back(semantic::Type::f64);
+                    state.stack.push_back(core::Type::f64);
                 break;
             case Opcode::addI64:
             case Opcode::subI64:
             case Opcode::mulI64:
             case Opcode::divI64:
             case Opcode::remI64:
-                valid = binary(semantic::Type::i64, semantic::Type::i64);
+                valid = binary(core::Type::i64, core::Type::i64);
                 break;
             case Opcode::addF64:
             case Opcode::subF64:
             case Opcode::mulF64:
             case Opcode::divF64:
-                valid = binary(semantic::Type::f64, semantic::Type::f64);
+                valid = binary(core::Type::f64, core::Type::f64);
                 break;
             case Opcode::equalI64:
             case Opcode::notEqualI64:
@@ -474,7 +319,7 @@ VerifyResult Verifier::verify(Program program) const {
             case Opcode::lessEqualI64:
             case Opcode::greaterI64:
             case Opcode::greaterEqualI64:
-                valid = binary(semantic::Type::i64, semantic::Type::boolean);
+                valid = binary(core::Type::i64, core::Type::boolean);
                 break;
             case Opcode::equalF64:
             case Opcode::notEqualF64:
@@ -482,17 +327,17 @@ VerifyResult Verifier::verify(Program program) const {
             case Opcode::lessEqualF64:
             case Opcode::greaterF64:
             case Opcode::greaterEqualF64:
-                valid = binary(semantic::Type::f64, semantic::Type::boolean);
+                valid = binary(core::Type::f64, core::Type::boolean);
                 break;
             case Opcode::equalBool:
             case Opcode::notEqualBool:
-                valid = binary(semantic::Type::boolean, semantic::Type::boolean);
+                valid = binary(core::Type::boolean, core::Type::boolean);
                 break;
             case Opcode::jump:
                 successors.push_back(instruction.operand);
                 break;
             case Opcode::jumpIfFalse:
-                valid = pop(semantic::Type::boolean);
+                valid = pop(core::Type::boolean);
                 successors.push_back(instruction.operand);
                 break;
             case Opcode::call: {
@@ -501,12 +346,12 @@ VerifyResult Verifier::verify(Program program) const {
                      it != signature.parameterTypes.rend();
                      ++it)
                     valid = pop(*it) && valid;
-                if (valid && signature.returnType != semantic::Type::voidType)
+                if (valid && signature.returnType != core::Type::voidType)
                     state.stack.push_back(signature.returnType);
                 break;
             }
             case Opcode::returnValue:
-                if (function.signature.returnType == semantic::Type::voidType) {
+                if (function.signature.returnType == core::Type::voidType) {
                     instructionError(function, pc, "void function cannot return a value");
                     valid = false;
                     break;
@@ -518,7 +363,7 @@ VerifyResult Verifier::verify(Program program) const {
                 }
                 break;
             case Opcode::returnVoid:
-                if (function.signature.returnType != semantic::Type::voidType) {
+                if (function.signature.returnType != core::Type::voidType) {
                     instructionError(function, pc, "non-void function must return a value");
                     valid = false;
                     break;
@@ -646,7 +491,7 @@ std::string dump(const VerifiedProgram& verified) {
         }
         return "<invalid>";
     };
-    const auto printConstant = [](std::ostream& output, const Value& value) {
+    const auto printConstant = [](std::ostream& output, const core::Value& value) {
         std::visit(
             [&output](const auto& item) {
                 using Item = std::decay_t<decltype(item)>;
@@ -661,18 +506,18 @@ std::string dump(const VerifiedProgram& verified) {
     };
     std::ostringstream output;
     for (const auto& function : program.functions) {
-        output << (function.kind == semantic::FunctionKind::host ? "host" : "fn") << " #"
-               << function.id << " (";
+        output << (function.kind == core::FunctionKind::host ? "host" : "fn") << " #" << function.id
+               << " (";
         for (std::size_t index = 0; index < function.signature.parameterTypes.size(); ++index) {
             if (index != 0)
                 output << ", ";
-            output << semantic::typeName(function.signature.parameterTypes[index]);
+            output << core::typeName(function.signature.parameterTypes[index]);
         }
-        output << ") -> " << semantic::typeName(function.signature.returnType) << '\n';
-        if (function.kind == semantic::FunctionKind::user)
+        output << ") -> " << core::typeName(function.signature.returnType) << '\n';
+        if (function.kind == core::FunctionKind::user)
             for (std::size_t slot = 0; slot < function.localTypes.size(); ++slot)
-                output << "  local %" << slot << ": "
-                       << semantic::typeName(function.localTypes[slot]) << '\n';
+                output << "  local %" << slot << ": " << core::typeName(function.localTypes[slot])
+                       << '\n';
         for (std::size_t i = 0; i < function.code.size(); ++i) {
             const auto& instruction = function.code[i];
             output << "  " << std::setw(4) << std::setfill('0') << i << "  ";

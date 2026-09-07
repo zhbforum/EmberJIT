@@ -22,15 +22,15 @@ constexpr std::int64_t loopIterations = 32;
     ember::bytecode::Program program{
         .functions = {
             {.id = 0,
-             .kind = ember::semantic::FunctionKind::user,
-             .signature = {.parameterTypes = {ember::semantic::Type::i64},
-                           .returnType = ember::semantic::Type::i64},
+             .kind = ember::core::FunctionKind::user,
+             .signature = {.parameterTypes = {ember::core::Type::i64},
+                           .returnType = ember::core::Type::i64},
              .localCount = 2,
-             .localTypes = {ember::semantic::Type::i64, ember::semantic::Type::i64},
+             .localTypes = {ember::core::Type::i64, ember::core::Type::i64},
              .code = {
                  {.opcode = ember::bytecode::Opcode::constant,
                   .operand = 0,
-                  .value = ember::bytecode::Value{std::int64_t{0}}},
+                  .value = ember::core::Value{std::int64_t{0}}},
                  {.opcode = ember::bytecode::Opcode::store, .operand = 1, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::load, .operand = 1, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::load, .operand = 0, .value = std::nullopt},
@@ -41,7 +41,7 @@ constexpr std::int64_t loopIterations = 32;
                  {.opcode = ember::bytecode::Opcode::load, .operand = 1, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::constant,
                   .operand = 0,
-                  .value = ember::bytecode::Value{std::int64_t{1}}},
+                  .value = ember::core::Value{std::int64_t{1}}},
                  {.opcode = ember::bytecode::Opcode::addI64, .operand = 0, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::store, .operand = 1, .value = std::nullopt},
                  {.opcode = ember::bytecode::Opcode::jump, .operand = 2, .value = std::nullopt},
@@ -58,7 +58,7 @@ constexpr std::int64_t loopIterations = 32;
 void execute(ember::runtime::VirtualMachine& vm, std::size_t count) {
     for (std::size_t iteration = 0; iteration < count; ++iteration) {
         const auto report = vm.execute(0, {loopIterations});
-        if (report.result.error || report.result.value != ember::bytecode::Value{loopIterations})
+        if (report.result.error || report.result.value != ember::core::Value{loopIterations})
             std::abort();
     }
 }

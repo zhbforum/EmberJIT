@@ -112,7 +112,7 @@ void remapUse(ValueId& value, const std::vector<ValueId>& newIds) {
 
 [[nodiscard]] Function compactValues(Function function) {
     std::vector<ValueId> newIds(function.valueTypes.size(), noValue);
-    std::vector<semantic::Type> valueTypes;
+    std::vector<core::Type> valueTypes;
     valueTypes.reserve(function.valueTypes.size());
     for (const auto& block : function.blocks) {
         for (const auto& instruction : block.instructions) {

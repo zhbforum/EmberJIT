@@ -4,22 +4,21 @@
 
 namespace ember::runtime {
 namespace {
-[[nodiscard]] bool valueMatches(const bytecode::Value& value, semantic::Type type) {
-    return (type == semantic::Type::i64 && std::holds_alternative<std::int64_t>(value)) ||
-           (type == semantic::Type::f64 && std::holds_alternative<double>(value)) ||
-           (type == semantic::Type::boolean && std::holds_alternative<bool>(value));
+[[nodiscard]] bool valueMatches(const core::Value& value, core::Type type) {
+    return (type == core::Type::i64 && std::holds_alternative<std::int64_t>(value)) ||
+           (type == core::Type::f64 && std::holds_alternative<double>(value)) ||
+           (type == core::Type::boolean && std::holds_alternative<bool>(value));
 }
 } // namespace
 
 std::optional<DispatchDecision>
-RuntimeDispatcher::dispatch(semantic::FunctionId functionId,
-                            std::span<const bytecode::Value> arguments) {
+RuntimeDispatcher::dispatch(core::FunctionId functionId, std::span<const core::Value> arguments) {
     auto* function = functions_.findMutable(functionId);
     if (function == nullptr)
         return std::nullopt;
 
     const auto& bytecode = function->bytecode();
-    if (bytecode.kind != semantic::FunctionKind::user ||
+    if (bytecode.kind != core::FunctionKind::user ||
         arguments.size() != bytecode.signature.parameterTypes.size()) {
         return std::nullopt;
     }

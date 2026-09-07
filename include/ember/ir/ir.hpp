@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ember/semantic/typed_ast.hpp"
+#include "ember/core/function.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -15,8 +15,6 @@ using LocalId = std::uint32_t;
 inline constexpr ValueId noValue = std::numeric_limits<ValueId>::max();
 inline constexpr BlockId noBlock = std::numeric_limits<BlockId>::max();
 inline constexpr LocalId noLocal = std::numeric_limits<LocalId>::max();
-inline constexpr semantic::FunctionId noFunction = std::numeric_limits<semantic::FunctionId>::max();
-
 enum class Opcode : std::uint8_t {
     parameter,
     constantI64,
@@ -62,8 +60,8 @@ struct Instruction {
     ValueId right{noValue};
     LocalId local{noLocal};
     std::int64_t constant{};
-    semantic::FunctionId callee{noFunction};
-    semantic::FunctionKind calleeKind{semantic::FunctionKind::user};
+    core::FunctionId callee{core::noFunction};
+    core::FunctionKind calleeKind{core::FunctionKind::user};
     std::vector<ValueId> arguments;
 
     [[nodiscard]] static Instruction parameter(ValueId result, LocalId local) noexcept;
@@ -78,18 +76,18 @@ struct Instruction {
     binary(Opcode opcode, ValueId result, ValueId left, ValueId right) noexcept;
     [[nodiscard]] static Instruction
     callI64(ValueId result,
-            semantic::FunctionId callee,
+            core::FunctionId callee,
             std::vector<ValueId> arguments,
-            semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+            core::FunctionKind calleeKind = core::FunctionKind::user);
     [[nodiscard]] static Instruction
     callValue(ValueId result,
-              semantic::FunctionId callee,
+              core::FunctionId callee,
               std::vector<ValueId> arguments,
-              semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+              core::FunctionKind calleeKind = core::FunctionKind::user);
     [[nodiscard]] static Instruction
-    callVoid(semantic::FunctionId callee,
+    callVoid(core::FunctionId callee,
              std::vector<ValueId> arguments,
-             semantic::FunctionKind calleeKind = semantic::FunctionKind::user);
+             core::FunctionKind calleeKind = core::FunctionKind::user);
 };
 
 // Visits every virtual-register use encoded by one instruction. Shared by
@@ -183,10 +181,10 @@ struct BasicBlock {
 // `valueTypes[index]` is the type of virtual register `v<index>`. Void is a
 // function return type only and is never a virtual-register or local type.
 struct Function {
-    semantic::FunctionId id;
-    semantic::FunctionSignature signature;
-    std::vector<semantic::Type> localTypes;
-    std::vector<semantic::Type> valueTypes;
+    core::FunctionId id;
+    core::FunctionSignature signature;
+    std::vector<core::Type> localTypes;
+    std::vector<core::Type> valueTypes;
     std::vector<BasicBlock> blocks;
 };
 } // namespace ember::ir

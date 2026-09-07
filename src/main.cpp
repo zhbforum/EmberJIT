@@ -1,8 +1,9 @@
-#include "ember/bytecode/builtins.hpp"
 #include "ember/bytecode/bytecode.hpp"
+#include "ember/bytecode/lowering.hpp"
 #include "ember/frontend/ast_printer.hpp"
 #include "ember/frontend/lexer.hpp"
 #include "ember/frontend/parser.hpp"
+#include "ember/integration/builtin_registration.hpp"
 #include "ember/ir/bytecode_lowerer.hpp"
 #include "ember/ir/dump.hpp"
 #include "ember/ir/optimization.hpp"
@@ -216,7 +217,7 @@ void printOptimizationFailure(const ember::ir::OptimizationResult& result) {
         return std::nullopt;
     }
     ember::semantic::HostFunctionRegistry hosts;
-    if (!ember::bytecode::registerBuiltins(hosts)) {
+    if (!ember::integration::registerBuiltins(hosts)) {
         std::cerr << "error: unable to initialize runtime built-ins\n";
         return std::nullopt;
     }
@@ -261,7 +262,7 @@ void printOptimizationFailure(const ember::ir::OptimizationResult& result) {
 }
 
 [[nodiscard]] auto findCliEntryPoint(std::string_view path, const PreparedRuntimeProgram& program)
-    -> std::optional<ember::semantic::FunctionId> {
+    -> std::optional<ember::core::FunctionId> {
     const auto entry = std::find_if(program.analysis.program->declarations.begin(),
                                     program.analysis.program->declarations.end(),
                                     [](const auto& function) { return function.name == "main"; });
@@ -281,8 +282,8 @@ void printOptimizationFailure(const ember::ir::OptimizationResult& result) {
                                   "entry function 'main' must not accept parameters");
         return std::nullopt;
     }
-    if (entry->signature.returnType != ember::semantic::Type::voidType &&
-        entry->signature.returnType != ember::semantic::Type::i64) {
+    if (entry->signature.returnType != ember::core::Type::voidType &&
+        entry->signature.returnType != ember::core::Type::i64) {
         printEntryPointDiagnostic(path,
                                   program.source,
                                   entry->nameSpan,
@@ -330,12 +331,12 @@ void printOptimizationFailure(const ember::ir::OptimizationResult& result) {
     }
 
     struct FunctionLowering {
-        ember::semantic::FunctionId id;
+        ember::core::FunctionId id;
         ember::ir::LoweringResult result;
     };
     std::vector<FunctionLowering> loweredFunctions;
     for (const auto& function : checked.program->program().functions) {
-        if (function.kind != ember::semantic::FunctionKind::user)
+        if (function.kind != ember::core::FunctionKind::user)
             continue;
         loweredFunctions.push_back(
             {.id = function.id,
@@ -389,7 +390,7 @@ void printOptimizationFailure(const ember::ir::OptimizationResult& result) {
         return 1;
     }
     for (const auto& function : checked.program->program().functions) {
-        if (function.kind != ember::semantic::FunctionKind::user)
+        if (function.kind != ember::core::FunctionKind::user)
             continue;
         auto lowered = ember::ir::Lowerer{}.lower(*checked.program, function.id);
         if (!lowered.function) {
@@ -420,7 +421,7 @@ void printOptimizationFailure(const ember::ir::OptimizationResult& result) {
 
 void printJitTrace(const ember::semantic::AnalysisResult& analysis,
                    const ember::runtime::ExecutionReport& report) {
-    std::unordered_map<ember::semantic::FunctionId, std::string> functionNames;
+    std::unordered_map<ember::core::FunctionId, std::string> functionNames;
     functionNames.reserve(analysis.program->declarations.size());
     for (const auto& function : analysis.program->declarations)
         functionNames.emplace(function.id, function.name);
@@ -432,9 +433,8 @@ void printJitTrace(const ember::semantic::AnalysisResult& analysis,
     }
 }
 
-[[nodiscard]] int runVm(PreparedRuntimeProgram program,
-                        ember::semantic::FunctionId entry,
-                        const RunOptions& options) {
+[[nodiscard]] int
+runVm(PreparedRuntimeProgram program, ember::core::FunctionId entry, const RunOptions& options) {
     const ember::runtime::RuntimeOptions runtimeOptions{
         .hotThreshold = options.hotThreshold,
         .jitEnabled = options.jitEnabled,
@@ -464,7 +464,7 @@ void printJitTrace(const ember::semantic::AnalysisResult& analysis,
 }
 
 [[nodiscard]] bool executeBenchmarkIteration(ember::runtime::VirtualMachine& vm,
-                                             ember::semantic::FunctionId entry) {
+                                             ember::core::FunctionId entry) {
     const auto report = vm.execute(entry);
     if (!report.result.error)
         return true;
@@ -505,7 +505,7 @@ private:
 
 [[nodiscard]] auto
 measureVirtualMachine(const ember::bytecode::VerifiedProgram& program,
-                      ember::semantic::FunctionId entry,
+                      ember::core::FunctionId entry,
                       std::uint64_t iterations) -> std::optional<std::chrono::nanoseconds> {
     auto clone = cloneVerifiedProgram(program);
     if (!clone)
@@ -527,7 +527,7 @@ measureVirtualMachine(const ember::bytecode::VerifiedProgram& program,
 
 [[nodiscard]] auto
 measureColdJit(const ember::bytecode::VerifiedProgram& program,
-               ember::semantic::FunctionId entry,
+               ember::core::FunctionId entry,
                std::uint64_t iterations) -> std::optional<std::chrono::nanoseconds> {
     std::chrono::nanoseconds elapsed{};
     const ember::runtime::RuntimeOptions options{
@@ -551,7 +551,7 @@ measureColdJit(const ember::bytecode::VerifiedProgram& program,
 
 [[nodiscard]] auto
 measureWarmedJit(ember::runtime::VirtualMachine& vm,
-                 ember::semantic::FunctionId entry,
+                 ember::core::FunctionId entry,
                  std::uint64_t iterations) -> std::optional<std::chrono::nanoseconds> {
     const auto started = std::chrono::steady_clock::now();
     for (std::uint64_t iteration{}; iteration < iterations; ++iteration) {
@@ -572,7 +572,7 @@ void printBenchmarkMeasurement(std::string_view label,
 }
 
 [[nodiscard]] int runBenchmark(const PreparedRuntimeProgram& program,
-                               ember::semantic::FunctionId entry,
+                               ember::core::FunctionId entry,
                                const BenchmarkOptions& options) {
     const ember::runtime::RuntimeOptions jitOptions{
         .hotThreshold = 1,

@@ -62,7 +62,7 @@ public:
     [[nodiscard]] const bytecode::Function& bytecode() const noexcept {
         return bytecode_;
     }
-    [[nodiscard]] semantic::FunctionId id() const noexcept {
+    [[nodiscard]] core::FunctionId id() const noexcept {
         return bytecode_.id;
     }
     [[nodiscard]] ExecutionTier tier() const noexcept {

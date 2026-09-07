@@ -8,24 +8,18 @@
 #include <vector>
 
 namespace ember::ssa {
-struct CallTarget {
-    semantic::FunctionId id{noFunction};
-    semantic::FunctionKind kind{semantic::FunctionKind::user};
-    semantic::FunctionSignature signature;
-};
-
 class CallTargetTable {
 public:
     // The table is caller-provided metadata. Verifier::verify validates its
     // ids, kinds, and signatures before retaining it in a verified function.
-    explicit CallTargetTable(std::vector<CallTarget> targets)
+    explicit CallTargetTable(std::vector<core::CallTarget> targets)
         : targets_(std::move(targets)) {
     }
 
-    [[nodiscard]] const CallTarget* find(semantic::FunctionId id) const noexcept;
+    [[nodiscard]] const core::CallTarget* find(core::FunctionId id) const noexcept;
 
 private:
-    std::vector<CallTarget> targets_;
+    std::vector<core::CallTarget> targets_;
 
     friend class Verifier;
 };

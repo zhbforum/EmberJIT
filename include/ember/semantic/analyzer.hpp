@@ -10,8 +10,9 @@
 namespace ember::semantic {
 
 struct HostFunction {
+    core::FunctionId id{core::noFunction};
     std::string name;
-    FunctionSignature signature;
+    core::FunctionSignature signature;
 };
 
 class HostFunctionRegistry {

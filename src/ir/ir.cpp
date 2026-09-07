@@ -48,9 +48,9 @@ Instruction::binary(Opcode opcode, ValueId result, ValueId left, ValueId right) 
 }
 
 Instruction Instruction::callI64(ValueId result,
-                                 semantic::FunctionId callee,
+                                 core::FunctionId callee,
                                  std::vector<ValueId> arguments,
-                                 semantic::FunctionKind calleeKind) {
+                                 core::FunctionKind calleeKind) {
     return {.opcode = Opcode::callI64,
             .result = result,
             .callee = callee,
@@ -59,9 +59,9 @@ Instruction Instruction::callI64(ValueId result,
 }
 
 Instruction Instruction::callValue(ValueId result,
-                                   semantic::FunctionId callee,
+                                   core::FunctionId callee,
                                    std::vector<ValueId> arguments,
-                                   semantic::FunctionKind calleeKind) {
+                                   core::FunctionKind calleeKind) {
     return {.opcode = Opcode::callValue,
             .result = result,
             .callee = callee,
@@ -69,9 +69,9 @@ Instruction Instruction::callValue(ValueId result,
             .arguments = std::move(arguments)};
 }
 
-Instruction Instruction::callVoid(semantic::FunctionId callee,
+Instruction Instruction::callVoid(core::FunctionId callee,
                                   std::vector<ValueId> arguments,
-                                  semantic::FunctionKind calleeKind) {
+                                  core::FunctionKind calleeKind) {
     return {.opcode = Opcode::callVoid,
             .callee = callee,
             .calleeKind = calleeKind,
