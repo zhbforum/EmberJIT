@@ -152,7 +152,10 @@ Each major stage owns a representation with a specific contract. Verification is
   <sub>Theme-adaptive SVG · Editable source: <a href="assets/emberjit-architecture.excalidraw">Excalidraw diagram</a></sub>
 </p>
 
-The most important architectural idea is not simply **VM versus JIT**.
+### Execution pipeline
+
+The execution pipeline is distinct from the module dependency graph below. The
+most important architectural idea is not simply **VM versus JIT**.
 
 It is the chain of increasingly trusted representations that lead to execution:
 
@@ -401,6 +404,14 @@ The IR models:
 The v0.1 IR intentionally does not use SSA or edge arguments.
 
 That keeps the baseline compiler small while still providing an explicit CFG representation suitable for verification and optimization.
+
+---
+
+### Isolated SSA representation
+
+`ember_ssa` currently provides an isolated v0.2 SSA representation, verifier,
+and deterministic dump support. It is not an active VM/JIT execution tier and
+does not yet participate in the v0.1 bytecode-to-native pipeline.
 
 ---
 
@@ -792,13 +803,18 @@ The repository layout mirrors these compiler/runtime layers.
 
 | Area | Responsibility | Useful starting points |
 | --- | --- | --- |
-| `support` | Source text, source locations, diagnostics, shared semantics | `source.*`, `diagnostic.hpp` |
+| `core` | Stage-independent language `Type`, materialized `Value`, function metadata, and call-target record | `type.hpp`, `value.hpp`, `function.hpp` |
+| `support` | Source text, source locations, diagnostics, and low-level semantic helpers | `source.*`, `diagnostic.hpp` |
 | `frontend` | Lexer, parser, AST, syntax inspection | `lexer.*`, `parser.*`, `ast.hpp` |
-| `semantic` | Scopes, types, symbols, functions, typed AST | `analyzer.*`, `typed_ast.hpp` |
-| `bytecode` | Typed program → stack bytecode and bytecode verification | `bytecode.*` |
-| `ir` | CFG IR, bytecode lowering, verification, optimization, dumps | `bytecode_lowerer.*`, `verifier.*`, `optimization.*` |
+| `semantic` | Scopes, symbols, resolved entities, typed AST, and host-function registry | `analyzer.*`, `typed_ast.hpp` |
+| `bytecode` | Bytecode representation, verification, VM-facing values, builtin descriptors, and invocation | `bytecode.*`, `builtins.hpp` |
+| `bytecode lowering` | Typed AST → bytecode adapter | `lowering.*` |
+| `ir` | CFG IR representation, verification, optimization, and dumps | `ir.*`, `verifier.*`, `optimization.*` |
+| `ir lowering` | Verified bytecode → IR adapter | `bytecode_lowerer.*` |
+| `ssa` | Isolated v0.2 SSA representation, verifier, and dumps | `ssa.*`, `verifier.*` |
 | `jit` | Baseline compiler, x86-64 emitter, executable memory | `baseline_compiler.*`, `emitter.*`, `code_buffer.*` |
 | `runtime` | VM, profiling, tier dispatch, native state and lifetime | `vm.*`, `runtime_function.*`, `native_code.*` |
+| `integration` | Explicit adapters between semantic and runtime-facing modules | `builtin_registration.*` |
 | CLI | User-facing execution, dumps, help, benchmark | `src/main.cpp` |
 | `tests` | Unit, regression, golden, invariant, and hostile-input tests | subsystem-specific suites |
 | `benchmarks` | Focused runtime measurements | `runtime_dispatch_benchmark.cpp` |
@@ -815,23 +831,29 @@ EmberJIT/
 │
 ├── include/ember/
 │   ├── bytecode/
+│   ├── core/
 │   ├── frontend/
+│   ├── integration/
 │   ├── ir/
 │   ├── jit/
 │   ├── runtime/
 │   ├── semantic/
+│   ├── ssa/
 │   └── support/
 │
 ├── src/
 │   ├── bytecode/
 │   ├── frontend/
+│   ├── integration/
 │   ├── ir/
 │   ├── jit/
 │   ├── runtime/
 │   ├── semantic/
+│   ├── ssa/
 │   └── support/
 │
 ├── tests/
+│   ├── architecture/
 │   ├── bytecode/
 │   ├── fixtures/
 │   ├── frontend/
@@ -840,6 +862,7 @@ EmberJIT/
 │   ├── jit/
 │   ├── runtime/
 │   ├── semantic/
+│   ├── ssa/
 │   └── support/
 │
 ├── .github/
@@ -850,25 +873,39 @@ EmberJIT/
 └── README.md
 ```
 
-The CMake target structure follows the same direction:
+### Module dependencies
+
+The CMake target graph documents ownership rather than execution order. An
+arrow points from a dependency to its consumer:
 
 ```text
-ember_support
-      ↓
-ember_frontend
-      ↓
-ember_semantic
-      ↓
-ember_bytecode
-      ↓
-ember_ir
-      ↓
-ember_jit
-      ↓
-ember_runtime
-      ↓
-ember
+ember_core ───────────────► ember_semantic
+      ├────────────────────► ember_bytecode
+      ├────────────────────► ember_ir
+      ├────────────────────► ember_ssa
+      ├────────────────────► ember_jit
+      └────────────────────► ember_runtime
+
+ember_support ────────────► ember_frontend ───► ember_semantic
+      ├────────────────────► ember_bytecode / ember_ir / ember_ssa / ember_jit
+
+ember_semantic + ember_bytecode ──────────────► ember_bytecode_lowering
+ember_bytecode + ember_semantic ──────────────► ember_builtin_integration
+ember_bytecode + ember_ir ────────────────────► ember_ir_lowering
+ember_ir + ember_bytecode ────────────────────► ember_jit
+ember_bytecode + ember_jit + ember_ir_lowering ► ember_runtime
 ```
+
+The representation targets do not depend on the Typed AST. `ember_bytecode_lowering`
+and `ember_builtin_integration` are the explicit semantic adapters; `ember_ir_lowering`
+is the explicit verified-bytecode adapter.
+
+`ember_jit` privately depends on `ember_bytecode` for trusted native builtin
+entry points. Its public compilation API accepts verified IR.
+
+Standalone consumers in `tests/architecture/` compile and link against only
+their respective bytecode, IR, SSA, or JIT target, so the main test executable
+cannot mask missing target dependencies.
 
 `ember_runtime` is the integration point where verified bytecode execution and native tiering meet.
 
@@ -1036,7 +1073,7 @@ The following are intentionally outside the v0.1 scope:
 - multithreading
 - ARM64 native code generation
 - `f32`
-- SSA IR
+- SSA pipeline integration and optimization
 - register allocation
 - spilling infrastructure
 - common-subexpression elimination
